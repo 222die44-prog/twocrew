@@ -5,6 +5,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { getRole, loadEvents, saveEvents } from "../services/schedule";
 import type { EventItem } from "../services/schedule";
 import { exportICS } from "../utils/ics";
+import { parseIcsToEvents } from "../utils/icsImport";
 
 type Role = "HAN" | "KYU";
 
@@ -74,6 +75,277 @@ function fmtHMFromDateKST(d: Date) {
   }).format(d);
 }
 
+function blockTimeLabel(startIso: string, endIso: string) {
+  const start = new Date(startIso);
+  const end = new Date(endIso);
+  const mins = Math.max(0, Math.round((end.getTime() - start.getTime()) / 60000));
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  return `${h}:${String(m).padStart(2, "0")}`;
+}
+
+function dutyTimeLabel(events: EventItem[], day: Date) {
+  const flights = events
+    .filter((e) => getKind(e) === "FLIGHT" && eventCoversDay(e, day))
+    .sort((a, b) => a.start.localeCompare(b.start));
+
+  if (flights.length === 0) return null;
+
+  const first = new Date(flights[0].start);
+  const last = new Date(flights[flights.length - 1].end);
+
+  const mins = Math.max(0, Math.round((last.getTime() - first.getTime()) / 60000));
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+
+  return `${h}:${String(m).padStart(2, "0")}`;
+}
+
+function showUpTimeLabel(events: EventItem[], day: Date) {
+  const flights = events
+    .filter((e) => getKind(e) === "FLIGHT" && eventCoversDay(e, day))
+    .sort((a, b) => a.start.localeCompare(b.start));
+
+  if (flights.length === 0) return null;
+
+  const first = new Date(flights[0].start);
+  const showUp = new Date(first.getTime() - 150 * 60000); // ETD - 2시간 30분
+
+  return fmtHMFromDateKST(showUp);
+}
+
+const airportCountry: Record<string, string> = {
+  ICN: "KR",
+  GMP: "KR",
+  PUS: "KR",
+  CJU: "KR",
+  TAE: "KR",
+  KWJ: "KR",
+  USN: "KR",
+  RSU: "KR",
+  KPO: "KR",
+  CJJ: "KR",
+  MWX: "KR",
+  YNY: "KR",
+
+  NRT: "JP",
+  HND: "JP",
+  KIX: "JP",
+  NGO: "JP",
+  FUK: "JP",
+  OKA: "JP",
+  CTS: "JP",
+  SDJ: "JP",
+  KOJ: "JP",
+  KMJ: "JP",
+  OIT: "JP",
+  KMI: "JP",
+  HIJ: "JP",
+  NGS: "JP",
+
+  PVG: "CN",
+  PEK: "CN",
+  PKX: "CN",
+  CAN: "CN",
+  SZX: "CN",
+  XIY: "CN",
+  TAO: "CN",
+  YNT: "CN",
+  DLC: "CN",
+  SHE: "CN",
+  HGH: "CN",
+  NKG: "CN",
+  WUH: "CN",
+  CGO: "CN",
+  CSX: "CN",
+  KMG: "CN",
+  CTU: "CN",
+  URC: "CN",
+  XMN: "CN",
+  FOC: "CN",
+  TNA: "CN",
+  TSN: "CN",
+  YNZ: "CN",
+  DYG: "CN",
+  YNJ: "CN",
+
+  TPE: "TW",
+  KHH: "TW",
+
+  HKG: "HK",
+  MFM: "MO",
+
+  HAN: "VN",
+  SGN: "VN",
+  DAD: "VN",
+  CXR: "VN",
+  PQC: "VN",
+  HUI: "VN",
+  VDO: "VN",
+
+  BKK: "TH",
+  DMK: "TH",
+  CNX: "TH",
+  HKT: "TH",
+  KBV: "TH",
+  USM: "TH",
+
+  MNL: "PH",
+  CEB: "PH",
+  CRK: "PH",
+  KLO: "PH",
+
+  SIN: "SG",
+
+  KUL: "MY",
+  PEN: "MY",
+  BKI: "MY",
+  KCH: "MY",
+  LGK: "MY",
+
+  CGK: "ID",
+  DPS: "ID",
+  SUB: "ID",
+
+  PNH: "KH",
+  REP: "KH",
+
+  VTE: "LA",
+  LPQ: "LA",
+
+  RGN: "MM",
+  MDL: "MM",
+
+  DEL: "IN",
+  BOM: "IN",
+  BLR: "IN",
+  MAA: "IN",
+
+  KTM: "NP",
+  DAC: "BD",
+  CMB: "LK",
+  MLE: "MV",
+
+  UBN: "MN",
+
+  TSE: "KZ",
+  ALA: "KZ",
+  TAS: "UZ",
+
+  DXB: "AE",
+  AUH: "AE",
+  DOH: "QA",
+  RUH: "SA",
+  JED: "SA",
+  DMM: "SA",
+  KWI: "KW",
+  BAH: "BH",
+  MCT: "OM",
+  AMM: "JO",
+  TLV: "IL",
+  IST: "TR",
+
+  GUM: "GU",
+  SPN: "MP",
+  PPT: "PF",
+
+  SYD: "AU",
+  BNE: "AU",
+  MEL: "AU",
+  PER: "AU",
+  ADL: "AU",
+  CNS: "AU",
+
+  AKL: "NZ",
+  CHC: "NZ",
+
+  HNL: "US",
+  OGG: "US",
+  KOA: "US",
+  LIH: "US",
+  GUM: "GU",
+
+  LAX: "US",
+  SFO: "US",
+  SEA: "US",
+  LAS: "US",
+  ORD: "US",
+  JFK: "US",
+  IAD: "US",
+  ATL: "US",
+  DFW: "US",
+  BOS: "US",
+  HNL: "US",
+  ANC: "US",
+  DTW: "US",
+  MSP: "US",
+
+  YYZ: "CA",
+  YVR: "CA",
+  YUL: "CA",
+
+  MEX: "MX",
+
+  GRU: "BR",
+
+  LHR: "GB",
+  LGW: "GB",
+
+  CDG: "FR",
+  NCE: "FR",
+
+  FRA: "DE",
+  MUC: "DE",
+
+  FCO: "IT",
+  MXP: "IT",
+
+  MAD: "ES",
+  BCN: "ES",
+
+  AMS: "NL",
+  BRU: "BE",
+  ZRH: "CH",
+  VIE: "AT",
+  CPH: "DK",
+  ARN: "SE",
+  OSL: "NO",
+  HEL: "FI",
+  PRG: "CZ",
+  WAW: "PL",
+  BUD: "HU",
+  ATH: "GR",
+  LIS: "PT",
+  DUB: "IE",
+  GVA: "CH",
+
+  SVO: "RU",
+  LED: "RU",
+};
+
+function flagUrlByAirport(airport?: string) {
+  if (!airport) return "";
+  const cc = airportCountry[airport]?.toLowerCase();
+  if (!cc) return "";
+  return `https://flagcdn.com/w20/${cc}.png`;
+}
+
+function countryFlag(code?: string) {
+  if (!code) return "";
+  const cc = airportCountry[code];
+  if (!cc) return "";
+  return cc
+    .toUpperCase()
+    .replace(/./g, (c) => String.fromCodePoint(127397 + c.charCodeAt(0)));
+}
+
+function loAirport(label: string) {
+  const m = label.match(/\((.*?)\)/);
+  return m ? m[1] : "";
+}
+
+
+
 /* =========================================================
    Kind / title helpers
 ========================================================= */
@@ -83,6 +355,8 @@ type Kind =
   | "LO"
   | "DO"
   | "ATDO"
+  | "ADO"
+  | "YYC"
   | "RESERVE"
   | "BLANK"
   | "RDO"
@@ -108,6 +382,8 @@ function getKind(e: EventItem): Kind {
     if (rawK === "LO") return "LO";
     if (rawK === "DO") return "DO";
     if (rawK === "ATDO") return "ATDO";
+    if (rawK === "ADO") return "ADO";
+    if (rawK === "YYC") return "YYC";
     if (rawK === "RESERVE") return "RESERVE";
     if (rawK === "BLANK") return "BLANK";
     if (rawK === "RDO") return "RDO";
@@ -123,6 +399,8 @@ function getKind(e: EventItem): Kind {
   if (t === "LO" || t.startsWith("LO ")) return "LO";
   if (t === "DO" || t.startsWith("DO ")) return "DO";
   if (t === "ATDO" || t.startsWith("ATDO ")) return "ATDO";
+  if (t === "ADO" || t.startsWith("ADO")) return "ADO";
+  if (t === "YYC" || t.startsWith("YYC")) return "YYC";
   if (t === "RESERVE" || t.startsWith("RESERVE ")) return "RESERVE";
   if (t === "BLANK" || t.startsWith("BLANK ")) return "BLANK";
   if (t === "RDO" || t.startsWith("RDO ")) return "RDO";
@@ -142,6 +420,10 @@ function getDisplayTitle(e: EventItem) {
       return "DO";
     case "ATDO":
       return "ATDO";
+    case "ADO":
+      return "ADO";
+    case "YYC":
+      return "YYC";
     case "RESERVE":
       return "RESERVE";
     case "BLANK":
@@ -163,6 +445,8 @@ function isAllDayEvent(e: EventItem) {
     (e as any).allDay === true ||
     kind === "DO" ||
     kind === "ATDO" ||
+    kind === "ADO" ||
+    kind === "YYC" ||
     kind === "ALM" ||
     kind === "ALV" ||
     kind === "RDO" ||
@@ -185,22 +469,39 @@ function isDutyLike(e: EventItem) {
 function parseFlightChip(title: string): { flightNo?: string; route?: string } {
   const t = normalizeSpaces(title).toUpperCase();
 
+  // flight number: KE833 / OZ123 / etc
   const mNo = t.match(/\b[A-Z]{1,3}\d{2,4}\b/);
   const flightNo = mNo?.[0];
 
-  const airports = Array.from(t.matchAll(/\b[A-Z]{3}\b/g)).map((m) => m[0]);
-  let route: string | undefined;
-
-  if (airports.length >= 2) {
-    route = `${airports[0]}-${airports[1]}`;
-  } else if (airports.length === 1) {
-    route = airports[0];
-  } else {
-    const mRoute = t.match(/\b[A-Z]{3}(?:-[A-Z]{3})+\b/);
-    route = mRoute?.[0];
+  // 1) 먼저 진짜 노선 형태(ICN-PUS 같은 하이픈 구간)를 우선 찾기
+  const routeMatches = Array.from(t.matchAll(/\b([A-Z]{3}-[A-Z]{3})\b/g)).map((m) => m[1]);
+  if (routeMatches.length > 0) {
+    return {
+      flightNo,
+      route: routeMatches[routeMatches.length - 1], // 마지막 실제 route 사용
+    };
   }
 
-  return { flightNo, route };
+  // 2) fallback: 공항코드만 있을 때는 TVL 같은 운영코드는 제외
+  const airports = Array.from(t.matchAll(/\b[A-Z]{3}\b/g))
+    .map((m) => m[0])
+    .filter((code) => !["TVL", "DH", "OAL"].includes(code));
+
+  if (airports.length >= 2) {
+    return {
+      flightNo,
+      route: `${airports[0]}-${airports[1]}`,
+    };
+  }
+
+  if (airports.length === 1) {
+    return {
+      flightNo,
+      route: airports[0],
+    };
+  }
+
+  return { flightNo };
 }
 
 function flightDestAirportFromTitle(title: string): string | null {
@@ -216,11 +517,15 @@ function flightBarLabelForDay(owner: Role, ownerEvents: EventItem[], day: Date) 
     .filter((e) => getKind(e) === "FLIGHT" && eventCoversDay(e, day))
     .sort((a, b) => a.start.localeCompare(b.start));
 
-  const first = flights[0];
-  if (!first) return owner;
+  if (flights.length === 0) return "✈";
 
-  const dest = flightDestAirportFromTitle(first.title);
-  return dest ? `→${dest}` : owner;
+  // 같은 날 여러 leg가 있으면 최종 도착지를 우선 표시
+  for (let i = flights.length - 1; i >= 0; i--) {
+    const dest = flightDestAirportFromTitle(flights[i].title);
+    if (dest) return `🛫 →${dest}`;
+  }
+
+  return "✈";
 }
 
 /* =========================================================
@@ -340,53 +645,67 @@ function dayOfWeekIndex(day: Date) {
   return day.getDay();
 }
 
-function splitRunIntoWeekBars(runStart: Date, runEnd: Date, month: Date) {
+function splitRunIntoWeekBars(runStart: Date, runEnd: Date, visibleDays: Date[]) {
   const out: { week: number; left: number; width: number; startIdx: number; endIdx: number }[] = [];
   const oneDay = 24 * 60 * 60 * 1000;
+
+  const visibleMap = new Map<string, number>();
+  visibleDays.forEach((d, i) => {
+    visibleMap.set(ymd(d), i);
+  });
 
   let cur = startOfDay(asDate(runStart));
   const end = startOfDay(asDate(runEnd));
 
-  let segStart = cur;
-  let segWeek = weekIndexOf(segStart, month);
+  let segStartIndex: number | null = null;
+  let prevIndex: number | null = null;
+
+  function pushSegment(startIndex: number, endIndex: number) {
+    const week = Math.floor(startIndex / 7);
+    const startIdx = startIndex % 7;
+    const endIdx = endIndex % 7;
+    const left = (startIdx / 7) * 100;
+    const right = ((endIdx + 1) / 7) * 100;
+
+    out.push({
+      week,
+      left,
+      width: Math.max(2, right - left),
+      startIdx,
+      endIdx,
+    });
+  }
 
   while (cur.getTime() <= end.getTime()) {
-    const w = weekIndexOf(cur, month);
-    if (w !== segWeek) {
-      const segEnd = new Date(cur.getTime() - oneDay);
-      const startIdx = dayOfWeekIndex(segStart);
-      const endIdx = dayOfWeekIndex(segEnd);
-      const left = (startIdx / 7) * 100;
-      const right = ((endIdx + 1) / 7) * 100;
+    const idx = visibleMap.get(ymd(cur));
 
-      out.push({
-        week: segWeek,
-        left,
-        width: Math.max(2, right - left),
-        startIdx,
-        endIdx,
-      });
+    if (idx !== undefined) {
+      if (segStartIndex === null) {
+        segStartIndex = idx;
+        prevIndex = idx;
+      } else {
+        const prevWeek = Math.floor(prevIndex! / 7);
+        const curWeek = Math.floor(idx / 7);
 
-      segStart = cur;
-      segWeek = w;
+        const isContinuous = idx === prevIndex! + 1;
+        const crossedWeek = curWeek !== prevWeek;
+
+        // 연속이 아니거나, 주가 바뀌면 여기서 segment 종료
+        if (!isContinuous || crossedWeek) {
+          pushSegment(segStartIndex, prevIndex!);
+          segStartIndex = idx;
+        }
+
+        prevIndex = idx;
+      }
     }
 
     cur = new Date(cur.getTime() + oneDay);
   }
 
-  const segEnd = end;
-  const startIdx = dayOfWeekIndex(segStart);
-  const endIdx = dayOfWeekIndex(segEnd);
-  const left = (startIdx / 7) * 100;
-  const right = ((endIdx + 1) / 7) * 100;
-
-  out.push({
-    week: segWeek,
-    left,
-    width: Math.max(2, right - left),
-    startIdx,
-    endIdx,
-  });
+  if (segStartIndex !== null && prevIndex !== null) {
+    pushSegment(segStartIndex, prevIndex);
+  }
 
   return out;
 }
@@ -421,6 +740,8 @@ type DayTag =
   | "RDO"
   | "DO"
   | "ATDO"
+  | "ADO"
+  | "YYC"
   | "HM_STBY"
   | "AP_STBY"
   | "JCRM"
@@ -441,7 +762,9 @@ const DAYTAG_PRIORITY: DayTag[] = [
   "BLANK",
   "RDO",
   "ATDO",
+  "ADO",
   "DO",
+  "YYC",
   "OTHER",
   "NONE",
 ];
@@ -460,7 +783,9 @@ function toDayTagFromKind(kind: Kind): DayTag {
   if (kind === "ALM") return "DO";
   if (kind === "ALV") return "DO";
   if (kind === "DO") return "DO";
-  if (kind === "ATDO") return "ATDO";
+  if (kind === "ATDO") return "DO";
+  if (kind === "ADO") return "DO";
+  if (kind === "YYC") return "DO";
   if (kind === "OTHER") return "OTHER";
   return "NONE";
 }
@@ -477,6 +802,39 @@ function dayTagFor(ownerEvents: EventItem[], day: Date): DayTag {
   }
 
   return "NONE";
+}
+
+function dayStatusFor(ownerEvents: EventItem[], day: Date, owner: Role): { tag: DayTag; label: string } {
+  const dayEvents = ownerEvents.filter((e) => eventCoversDay(e, day));
+
+  const hasLo = dayEvents.some((e) => getKind(e) === "LO");
+  if (hasLo) {
+    return {
+      tag: "LO",
+      label: explicitLoLabelForDay(ownerEvents, day) ?? loLabelForRun(ownerEvents, day, day),
+    };
+  }
+
+  const flights = dayEvents
+    .filter((e) => getKind(e) === "FLIGHT")
+    .sort((a, b) => a.start.localeCompare(b.start));
+
+  if (flights.length > 0) {
+    return {
+      tag: "FLIGHT",
+      label: flightBarLabelForDay(owner, ownerEvents, day),
+    };
+  }
+
+  const kinds = dayEvents.map((e) => getKind(e));
+
+  if (kinds.includes("RESERVE")) return { tag: "RESERVE", label: "RESERVE" };
+  if (kinds.includes("DO") || kinds.includes("ALM") || kinds.includes("YYC") || kinds.includes("ATDO") || kinds.includes("ADO") || kinds.includes("ALV") || kinds.includes("RDO")) {
+    return { tag: "DO", label: "DO" };
+  }
+  if (kinds.includes("BLANK")) return { tag: "BLANK", label: "BLANK" };
+
+  return { tag: "NONE", label: "" };
 }
 
 function buildRunsByDayKey(days: Date[], keyOf: (d: Date) => { tag: DayTag; label: string }) {
@@ -523,6 +881,8 @@ function buildRunsByDayKey(days: Date[], keyOf: (d: Date) => { tag: DayTag; labe
         k.tag === "RESERVE" ||
         k.tag === "BLANK" ||
         k.tag === "ATDO" ||
+        k.tag === "YYC" ||
+        k.tag === "ADO" ||
         (k.tag === "LO" && k.label === curLabel) ||
         (k.tag === "FLIGHT" && k.label === curLabel)
       );
@@ -561,17 +921,150 @@ type BarSeg = {
 
 type PlacedBar = BarSeg & { lane: number };
 
-function loLabelForDay(events: EventItem[], day: Date) {
+const HOME_AIRPORTS = new Set(["ICN", "GMP"]);
+
+function extractAirportFromLoTitle(title: string): string | null {
+  const t = normalizeSpaces(title).toUpperCase();
+
+  const routeMatch = t.match(/\b([A-Z]{3})-([A-Z]{3})\b/);
+  if (routeMatch) {
+    const from = routeMatch[1];
+    const to = routeMatch[2];
+
+    if (from === to) return from;
+    if (!HOME_AIRPORTS.has(to)) return to;
+    if (!HOME_AIRPORTS.has(from)) return from;
+  }
+
+  const codes = Array.from(t.matchAll(/\b[A-Z]{3}\b/g))
+    .map((m) => m[0])
+    .filter((code) => !["LO", "TVL", "DH", "OAL"].includes(code));
+
+  const nonHome = codes.find((code) => !HOME_AIRPORTS.has(code));
+  return nonHome ?? codes[0] ?? null;
+}
+
+function explicitLoLabelForDay(events: EventItem[], day: Date): string | null {
   const lo = events.find((e) => getKind(e) === "LO" && eventCoversDay(e, day));
-  if (!lo) return "LO";
-  return normalizeSpaces(lo.title) || "LO";
+  if (!lo) return null;
+
+  const raw = normalizeSpaces(lo.title).toUpperCase();
+  if (raw === "LO") return null;
+
+  const airport = extractAirportFromLoTitle(lo.title);
+  return airport ? `LO (${airport})` : null;
+}
+
+function getRouteAirports(title: string) {
+  const parsed = parseFlightChip(title);
+  if (!parsed.route) return { from: null as string | null, to: null as string | null };
+
+  const parts = parsed.route.split("-");
+  return {
+    from: parts[0] || null,
+    to: parts[1] || null,
+  };
+}
+
+function flightOriginAirportFromTitle(title: string): string | null {
+  const { route } = parseFlightChip(title);
+  if (!route) return null;
+  const parts = route.split("-");
+  return parts[0] || null;
+}
+
+function flightDestAirportFromTitleSafe(title: string): string | null {
+  const { route } = parseFlightChip(title);
+  if (!route) return null;
+  const parts = route.split("-");
+  return parts.length >= 2 ? parts[1] || null : parts[0] || null;
+}
+
+function loLabelForRun(events: EventItem[], start: Date, end: Date) {
+  const explicit = explicitLoLabelForDay(events, start);
+  if (explicit) return explicit;
+
+  const score = new Map<string, number>();
+
+  let cur = new Date(startOfDay(start));
+  const endDay = startOfDay(end);
+
+  while (cur.getTime() <= endDay.getTime()) {
+    const dayFlights = events
+      .filter((e) => getKind(e) === "FLIGHT" && eventCoversDay(e, cur))
+      .sort((a, b) => a.start.localeCompare(b.start));
+
+    if (dayFlights.length > 0) {
+      const firstOrigin = flightOriginAirportFromTitle(dayFlights[0].title);
+      const lastDest = flightDestAirportFromTitleSafe(dayFlights[dayFlights.length - 1].title);
+
+      if (
+        firstOrigin &&
+        lastDest &&
+        firstOrigin === lastDest &&
+        !HOME_AIRPORTS.has(firstOrigin)
+      ) {
+        score.set(firstOrigin, (score.get(firstOrigin) || 0) + 5);
+      }
+
+      if (firstOrigin && !HOME_AIRPORTS.has(firstOrigin)) {
+        score.set(firstOrigin, (score.get(firstOrigin) || 0) + 2);
+      }
+
+      if (lastDest && !HOME_AIRPORTS.has(lastDest)) {
+        score.set(lastDest, (score.get(lastDest) || 0) + 1);
+      }
+    }
+
+    cur.setDate(cur.getDate() + 1);
+  }
+
+  if (score.size > 0) {
+    let bestCode = "";
+    let bestScore = -1;
+
+    for (const [code, value] of score.entries()) {
+      if (value > bestScore) {
+        bestCode = code;
+        bestScore = value;
+      }
+    }
+
+    if (bestCode) return `LO (${bestCode})`;
+  }
+
+  return "LO";
+}
+
+function loDurationLabel(events: EventItem[], start: Date, end: Date) {
+  const loEvents = events
+    .filter((e) => getKind(e) === "LO")
+    .filter((e) => {
+      const s = parseISO(e.start);
+      const en = parseISO(e.end);
+      return s <= endOfDay(end) && en >= startOfDay(start);
+    });
+
+  if (loEvents.length > 0) {
+    const startMs = Math.min(...loEvents.map((e) => parseISO(e.start).getTime()));
+    const endMs = Math.max(...loEvents.map((e) => parseISO(e.end).getTime()));
+    const hours = Math.max(1, Math.round((endMs - startMs) / 3600000));
+    return `${hours}h`;
+  }
+
+  const startMs = startOfDay(start).getTime();
+  const endMs = endOfDay(end).getTime();
+  const hours = Math.max(1, Math.round((endMs - startMs) / 3600000));
+  return `${hours}h`;
 }
 
 function barLabel(tag: DayTag, owner: Role) {
-  if (tag === "FLIGHT") return owner;
+  if (tag === "FLIGHT") return "✈";
   if (tag === "LO") return "LO";
   if (tag === "DO") return "DO";
+  if (tag === "ADO") return "ADO";
   if (tag === "ATDO") return "ATDO";
+  if (tag === "YYC") return "YYC";
   if (tag === "RESERVE") return "RESERVE";
   if (tag === "BLANK") return "BLANK";
   if (tag === "RDO") return "DO";
@@ -587,16 +1080,16 @@ function barLabel(tag: DayTag, owner: Role) {
 function barStyle(tag: DayTag, owner: Role): CSSProperties {
   const base: CSSProperties = {
     boxSizing: "border-box",
-    height: 18,
-    borderRadius: 8,
-    padding: "0 8px",
+    height: 24,
+    borderRadius: 9,
+    padding: "0 10px",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
     overflow: "hidden",
     whiteSpace: "nowrap",
     textOverflow: "ellipsis",
-    fontSize: 11,
+    fontSize: 13,
     fontWeight: 900,
     border: "1px solid rgba(0,0,0,0.10)",
     color: "rgba(17,24,39,0.95)",
@@ -604,34 +1097,65 @@ function barStyle(tag: DayTag, owner: Role): CSSProperties {
   };
 
   if (tag === "FLIGHT") {
-    const c = owner === "HAN" ? "rgba(0,122,255,0.16)" : "rgba(239,68,68,0.16)";
-    const b = owner === "HAN" ? "rgba(0,122,255,0.30)" : "rgba(239,68,68,0.30)";
+    const c = owner === "HAN" ? "rgba(0,122,255,0.40)" : "rgba(239,68,68,0.40)";
+    const b = owner === "HAN" ? "rgba(0,122,255,0.40)" : "rgba(239,68,68,0.40)";
     return { ...base, background: c, borderColor: b };
   }
+
   if (tag === "LO") {
-    return { ...base, background: "rgba(14,165,233,0.16)", borderColor: "rgba(14,165,233,0.30)" };
+    if (owner === "HAN") {
+      return {
+        ...base,
+        background: "rgba(0,122,255,0.40)",
+        borderColor: "rgba(0,122,255,0.4)",
+      };
+    }
+
+    if (owner === "KYU") {
+      return {
+        ...base,
+        background: "rgba(239,68,68,0.40)",
+        borderColor: "rgba(239,68,68,0.45)",
+      };
+    }
   }
+
   if (tag === "RESERVE") {
-    return { ...base, background: "rgba(245,158,11,0.16)", borderColor: "rgba(245,158,11,0.30)" };
+    return { ...base, background: "rgba(245,158,11,0.40)", borderColor: "rgba(245,158,11,0.30)" };
   }
+
   if (tag === "BLANK") {
     return { ...base, background: "rgba(245,158,11,0.16)", borderColor: "rgba(245,158,11,0.30)" };
   }
+
   if (tag === "DO") {
-    return { ...base, background: "rgba(34,197,94,0.14)", borderColor: "rgba(34,197,94,0.25)" };
+    return { ...base, background: "rgba(34,197,94,0.40)", borderColor: "rgba(34,197,94,0.25)" };
   }
+
   if (tag === "ATDO") {
-    return { ...base, background: "rgba(100,116,139,0.14)", borderColor: "rgba(100,116,139,0.26)" };
+    return { ...base, background: "rgba(34,197,94,0.40)", borderColor: "rgba(100,116,139,0.26)" };
   }
+
+  if (tag === "YYC") {
+    return { ...base, background: "rgba(34,197,94,0.40)", borderColor: "rgba(100,116,139,0.26)" };
+  }
+
+  if (tag === "ADO") {
+    return { ...base, background: "rgba(34,197,94,0.40)", borderColor: "rgba(100,116,139,0.26)" };
+  }
+
   if (tag === "HM_STBY" || tag === "AP_STBY") {
     return { ...base, background: "rgba(236,72,153,0.14)", borderColor: "rgba(236,72,153,0.28)" };
   }
+
   if (tag === "RCRM" || tag === "JCRM" || tag === "EMER") {
     return { ...base, background: "rgba(251,113,133,0.12)", borderColor: "rgba(251,113,133,0.25)" };
   }
+
   if (tag === "OTHER") {
     return { ...base, background: "rgba(161,161,170,0.14)", borderColor: "rgba(161,161,170,0.26)" };
   }
+
   return { ...base, background: "transparent", borderColor: "transparent" };
 }
 
@@ -705,6 +1229,16 @@ function kindBadgeStyle(e: EventItem): CSSProperties {
         background: "rgba(100,116,139,0.12)",
         border: "1px solid rgba(100,116,139,0.22)",
       };
+    case "YYC":
+      return {
+        background: "rgba(100,116,139,0.12)",
+        border: "1px solid rgba(100,116,139,0.22)",
+      };
+    case "ADO":
+      return {
+        background: "rgba(100,116,139,0.12)",
+        border: "1px solid rgba(100,116,139,0.22)",
+      };
     case "RESERVE":
     case "BLANK":
       return {
@@ -743,7 +1277,7 @@ function ownerChipBG(owner: Role) {
 }
 
 function ownerChipBorder(owner: Role) {
-  return owner === "HAN" ? "rgba(0,122,255,0.16)" : "rgba(239,68,68,0.22)";
+  return owner === "HAN" ? "rgba(0,122,255,0.35)" : "rgba(239,68,68,0.22)";
 }
 
 function mergeAndSaveImportedEvents(imported: EventItem[], owner: Role) {
@@ -769,21 +1303,37 @@ function mergeAndSaveImportedEvents(imported: EventItem[], owner: Role) {
   saveEvents(dedup);
 }
 
-function FlightChip({ owner, e }: { owner: Role; e: EventItem }) {
+function FlightChip({
+  owner,
+  e,
+  onClick,
+}: {
+  owner: Role;
+  e: EventItem;
+  onClick?: () => void;
+}) {
   const parsed = parseFlightChip(e.title);
   const flightNo = parsed.flightNo || "";
   const route = parsed.route || normalizeSpaces(e.title);
 
   return (
     <div
+      onClick={(ev) => {
+        ev.stopPropagation();
+        onClick?.();
+      }}
+      role="button"
       style={{
+        justifySelf: "stretch",
+        minWidth: 0,
         display: "grid",
         gridTemplateColumns: "4px 1fr",
         borderRadius: 10,
         overflow: "hidden",
         border: `1px solid ${ownerChipBorder(owner)}`,
         background: ownerChipBG(owner),
-        minHeight: 34,
+        minHeight: 30,
+        cursor: "pointer",
       }}
       title={`${e.title}\n${fmtHMFromISO(e.start)} ~ ${fmtHMFromISO(e.end)}`}
     >
@@ -792,8 +1342,9 @@ function FlightChip({ owner, e }: { owner: Role; e: EventItem }) {
         style={{
           padding: "3px 6px",
           display: "grid",
-          gap: 1,
+          gap: 2,
           alignContent: "center",
+          minWidth: 0,
         }}
       >
         <div
@@ -802,7 +1353,7 @@ function FlightChip({ owner, e }: { owner: Role; e: EventItem }) {
             alignItems: "center",
             justifyContent: "center",
             gap: 4,
-            fontSize: 10,
+            fontSize: 14,
             fontWeight: 900,
             color: ownerColor(owner),
             lineHeight: 1.1,
@@ -814,7 +1365,7 @@ function FlightChip({ owner, e }: { owner: Role; e: EventItem }) {
         </div>
         <div
           style={{
-            fontSize: 10,
+            fontSize: 14,
             fontWeight: 800,
             opacity: 0.9,
             lineHeight: 1.1,
@@ -825,7 +1376,7 @@ function FlightChip({ owner, e }: { owner: Role; e: EventItem }) {
           {route}
         </div>
       </div>
-    </div>
+    </div >
   );
 }
 
@@ -837,23 +1388,27 @@ function StatusChip({ e }: { e: EventItem }) {
       ? getDisplayTitle(e)
       : kind === "ATDO"
         ? "ATDO"
-        : kind === "DO"
-          ? "DO"
-          : kind === "RESERVE"
-            ? "RESERVE"
-            : kind === "BLANK"
-              ? "BLANK"
-              : kind === "RDO"
-                ? "DO"
-                : kind === "ALM"
-                  ? "DO"
-                  : kind === "ALV"
+        : kind === "ADO"
+          ? "ADO"
+          : kind === "YYC"
+            ? "YYC"
+            : kind === "DO"
+              ? "DO"
+              : kind === "RESERVE"
+                ? "RESERVE"
+                : kind === "BLANK"
+                  ? "BLANK"
+                  : kind === "RDO"
                     ? "DO"
-                    : kind === "HM_STBY"
-                      ? "HM_STBY"
-                      : kind === "AP_STBY"
-                        ? "AP_STBY"
-                        : getDisplayTitle(e);
+                    : kind === "ALM"
+                      ? "DO"
+                      : kind === "ALV"
+                        ? "DO"
+                        : kind === "HM_STBY"
+                          ? "HM_STBY"
+                          : kind === "AP_STBY"
+                            ? "AP_STBY"
+                            : getDisplayTitle(e);
 
   return (
     <div
@@ -900,6 +1455,18 @@ export default function CalendarPage() {
   const [month, setMonth] = useState(() => new Date());
   const [selectedDay, setSelectedDay] = useState<Date | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [selectedFlight, setSelectedFlight] = useState<EventItem | null>(null);
+  const [isFlightModalOpen, setIsFlightModalOpen] = useState(false);
+
+  function openFlight(e: EventItem) {
+    setSelectedFlight(e);
+    setIsFlightModalOpen(true);
+  }
+
+  function closeFlight() {
+    setSelectedFlight(null);
+    setIsFlightModalOpen(false);
+  }
 
   useEffect(() => {
     const imported = (location.state as any)?.importedEvents as EventItem[] | undefined;
@@ -936,12 +1503,26 @@ export default function CalendarPage() {
     monthDays.push(new Date(month.getFullYear(), month.getMonth(), d));
   }
 
-  const cells: (Date | null)[] = [];
-  for (let i = 0; i < firstWeekday; i++) cells.push(null);
+  const cells: Date[] = [];
+
+  // 이전 달 날짜 채우기
+  const prevMonthLastDay = new Date(month.getFullYear(), month.getMonth(), 0).getDate();
+  for (let i = firstWeekday - 1; i >= 0; i--) {
+    cells.push(new Date(month.getFullYear(), month.getMonth() - 1, prevMonthLastDay - i));
+  }
+
+  // 현재 달 날짜
   for (const d of monthDays) cells.push(d);
-  while (cells.length % 7 !== 0) cells.push(null);
+
+  // 다음 달 날짜 채우기
+  let nextDay = 1;
+  while (cells.length % 7 !== 0) {
+    cells.push(new Date(month.getFullYear(), month.getMonth() + 1, nextDay));
+    nextDay++;
+  }
 
   const weekCount = Math.ceil(cells.length / 7);
+  const visibleDays = cells;
 
   function prevMonth() {
     setMonth(new Date(month.getFullYear(), month.getMonth() - 1, 1));
@@ -964,12 +1545,12 @@ export default function CalendarPage() {
 
   const minutesByDayKey = useMemo(() => {
     const map = new Map<string, number>();
-    for (const d of monthDays) {
+    for (const d of visibleDays) {
       const { minutes } = overlapMinutesForDay(hanDutyEvents, kyuDutyEvents, d);
       map.set(ymd(d), minutes);
     }
     return map;
-  }, [hanDutyEvents, kyuDutyEvents, monthDays]);
+  }, [hanDutyEvents, kyuDutyEvents, visibleDays]);
 
   const overlapRuns = useMemo(() => {
     const runs: { start: Date; end: Date; dayCount: number; totalMinutes: number }[] = [];
@@ -979,7 +1560,7 @@ export default function CalendarPage() {
     let curEnd: Date | null = null;
     let curCount = 0;
 
-    for (const d of monthDays) {
+    for (const d of visibleDays) {
       const has = (minutesByDayKey.get(ymd(d)) || 0) > 0;
 
       if (!has) {
@@ -1037,22 +1618,14 @@ export default function CalendarPage() {
     }
 
     return runs;
-  }, [monthDays, minutesByDayKey]);
+  }, [visibleDays, minutesByDayKey]);
 
   const { placedBars, maxLaneByWeek } = useMemo(() => {
     const segs: BarSeg[] = [];
 
-    const hanRuns = buildRunsByDayKey(monthDays, (d) => {
-      const tag = dayTagFor(visHanEvents, d);
-      const label = tag === "FLIGHT" ? flightBarLabelForDay("HAN", visHanEvents, d) : barLabel(tag, "HAN");
-      return { tag, label };
-    });
+    const hanRuns = buildRunsByDayKey(visibleDays, (d) => dayStatusFor(visHanEvents, d, "HAN"));
 
-    const kyuRuns = buildRunsByDayKey(monthDays, (d) => {
-      const tag = dayTagFor(visKyuEvents, d);
-      const label = tag === "FLIGHT" ? flightBarLabelForDay("KYU", visKyuEvents, d) : barLabel(tag, "KYU");
-      return { tag, label };
-    });
+    const kyuRuns = buildRunsByDayKey(visibleDays, (d) => dayStatusFor(visKyuEvents, d, "KYU"));
 
     const pushRun = (owner: Role, tag: DayTag, start: Date, end: Date) => {
       if (tag === "NONE") return;
@@ -1060,14 +1633,25 @@ export default function CalendarPage() {
       let label = barLabel(tag, owner);
 
       if (tag === "LO") {
-        label = owner === "HAN" ? loLabelForDay(visHanEvents, start) : loLabelForDay(visKyuEvents, start);
+        const loText =
+          owner === "HAN"
+            ? loLabelForRun(visHanEvents, start, end)
+            : loLabelForRun(visKyuEvents, start, end);
+
+        const loDur =
+          owner === "HAN"
+            ? loDurationLabel(visHanEvents, start, end)
+            : loDurationLabel(visKyuEvents, start, end);
+
+        label = `${loText} · ${loDur}`;
       } else if (tag === "FLIGHT") {
-        label = owner === "HAN"
-          ? flightBarLabelForDay("HAN", visHanEvents, start)
-          : flightBarLabelForDay("KYU", visKyuEvents, start);
+        label =
+          owner === "HAN"
+            ? flightBarLabelForDay("HAN", visHanEvents, start)
+            : flightBarLabelForDay("KYU", visKyuEvents, start);
       }
 
-      for (const s of splitRunIntoWeekBars(start, end, month)) {
+      for (const s of splitRunIntoWeekBars(start, end, visibleDays)) {
         segs.push({
           id: `${owner}-${tag}-${ymd(start)}-${ymd(end)}-${s.week}-${s.startIdx}-${s.endIdx}`,
           week: s.week,
@@ -1088,7 +1672,7 @@ export default function CalendarPage() {
     if (compareOn) {
       for (const r of overlapRuns) {
         const label = `Overlap ${hoursLabel(r.totalMinutes, r.dayCount)}`;
-        for (const s of splitRunIntoWeekBars(r.start, r.end, month)) {
+        for (const s of splitRunIntoWeekBars(r.start, r.end, visibleDays)) {
           segs.push({
             id: `OVL-${ymd(r.start)}-${ymd(r.end)}-${s.week}-${s.startIdx}-${s.endIdx}`,
             week: s.week,
@@ -1106,7 +1690,7 @@ export default function CalendarPage() {
 
     const { placed, maxLane } = assignLanesPerWeek(segs);
     return { placedBars: placed, maxLaneByWeek: maxLane };
-  }, [monthDays, month, visHanEvents, visKyuEvents, overlapRuns, compareOn]);
+  }, [visibleDays, month, visHanEvents, visKyuEvents, overlapRuns, compareOn]);
 
   const weekDays = ["일", "월", "화", "수", "목", "금", "토"];
 
@@ -1115,6 +1699,23 @@ export default function CalendarPage() {
   const modalOverlap = selectedDay
     ? overlapForDay(visHanDutyEvents, visKyuDutyEvents, selectedDay)
     : { intervals: [], minutes: 0 };
+
+  const selectedFlightDay = selectedFlight
+    ? startOfDay(new Date(selectedFlight.start))
+    : null;
+
+  const selectedFlightOwnerEvents =
+    selectedFlight?.owner === "HAN" ? visHanEvents : visKyuEvents;
+
+  const selectedDutyLabel =
+    selectedFlight && selectedFlightDay
+      ? dutyTimeLabel(selectedFlightOwnerEvents, selectedFlightDay)
+      : null;
+
+  const selectedShowUpLabel =
+    selectedFlight && selectedFlightDay
+      ? showUpTimeLabel(selectedFlightOwnerEvents, selectedFlightDay)
+      : null;
 
   function exportAll() {
     exportICS(events, `twocrew-all-${monthLabel(month)}.ics`);
@@ -1128,10 +1729,74 @@ export default function CalendarPage() {
     exportICS(kyuEvents, `twocrew-kyu-${monthLabel(month)}.ics`);
   }
 
+  async function importIcsFile(owner: Role, file: File) {
+    const text = await file.text();
+    const imported = parseIcsToEvents(text, owner);
+    mergeAndSaveImportedEvents(imported, owner);
+    setRefreshSig((s) => s + 1);
+  }
+
+  async function onPickIcs(owner: Role) {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".ics,text/calendar";
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      await importIcsFile(owner, file);
+    };
+    input.click();
+  }
+
+  const [darkMode, setDarkMode] = useState(true);
+
+  const theme = darkMode
+    ? {
+      pageBg: "#111827",
+      cardBg: "#1f2937",
+      headerBg: "#243041",
+      border: "rgba(255,255,255,0.10)",
+      borderSoft: "rgba(255,255,255,0.06)",
+      text: "rgba(255,255,255,0.92)",
+      textSoft: "rgba(255,255,255,0.72)",
+      textDim: "rgba(255,255,255,0.40)",
+      emptyBg: "rgba(255,255,255,0.03)",
+      todayBg: "#ffffff",
+      todayText: "#000000",
+      buttonBg: "#243041",
+      modalBg: "#1f2937",
+      overlay: "rgba(0,0,0,0.60)",
+    }
+    : {
+      pageBg: "#f3f4f6",
+      cardBg: "#ffffff",
+      headerBg: "rgba(0,0,0,0.02)",
+      border: "rgba(0,0,0,0.10)",
+      borderSoft: "rgba(0,0,0,0.06)",
+      text: "rgba(17,24,39,0.92)",
+      textSoft: "rgba(17,24,39,0.75)",
+      textDim: "rgba(0,0,0,0.25)",
+      emptyBg: "rgba(0,0,0,0.03)",
+      todayBg: "rgba(0,0,0,0.95)",
+      todayText: "#ffffff",
+      buttonBg: "#ffffff",
+      modalBg: "#ffffff",
+      overlay: "rgba(0,0,0,0.35)",
+    };
+
   const todayKey = ymd(new Date());
 
   return (
-    <div style={{ padding: 12, maxWidth: 980, margin: "0 auto" }}>
+    <div
+      style={{
+        padding: 12,
+        maxWidth: 980,
+        margin: "0 auto",
+        background: theme.pageBg,
+        color: theme.text,
+        minHeight: "100vh",
+      }}
+    >
       <div
         style={{
           display: "flex",
@@ -1142,25 +1807,125 @@ export default function CalendarPage() {
         }}
       >
         <div>
-          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 900 }}>캘린더</h2>
-          <div style={{ opacity: 0.75, marginTop: 4, fontSize: 12 }}>현재 사용자: {meName}</div>
+          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 900, color: theme.text }}>캘린더</h2>
+          <div style={{ marginTop: 4, fontSize: 12, color: theme.textSoft }}>현재 사용자: {meName}</div>
         </div>
 
         <div style={{ display: "flex", gap: 8, alignItems: "center", justifyContent: "flex-end", flexWrap: "wrap" }}>
-          <button onClick={prevMonth} style={btnStyle}>이전달</button>
+
+
+
+          <button
+            onClick={prevMonth}
+            style={{
+              ...btnStyle,
+              background: theme.buttonBg,
+              color: theme.text,
+              border: `1px solid ${theme.border}`,
+            }}
+          >
+            이전달
+          </button>
           <div style={{ fontWeight: 900, fontSize: 16, minWidth: 80, textAlign: "center" }}>
             {monthLabel(month)}
           </div>
-          <button onClick={nextMonth} style={btnStyle}>다음달</button>
+          <button
+            onClick={nextMonth}
+            style={{
+              ...btnStyle,
+              background: theme.buttonBg,
+              color: theme.text,
+              border: `1px solid ${theme.border}`,
+            }}
+          >
+            다음달
+          </button>
+          <button
+            onClick={exportAll}
+            style={{
+              ...btnStyle,
+              background: theme.buttonBg,
+              color: theme.text,
+              border: `1px solid ${theme.border}`,
+            }}
+          >
+            ICS(전체)
+          </button>
+          <button
+            onClick={exportHan}
+            style={{
+              ...btnStyle,
+              background: theme.buttonBg,
+              color: theme.text,
+              border: `1px solid ${theme.border}`,
+            }}
+          >
+            ICS(HAN)
+          </button>
+          <button
+            onClick={exportKyu}
+            style={{
+              ...btnStyle,
+              background: theme.buttonBg,
+              color: theme.text,
+              border: `1px solid ${theme.border}`,
+            }}
+          >
+            ICS(KYU)
+          </button>
+          <button
+            onClick={() => navigate("/stats")}
+            style={{
+              ...btnStyle,
+              background: theme.buttonBg,
+              color: theme.text,
+              border: `1px solid ${theme.border}`,
+            }}
+          >
+            통계
+          </button>
+          <button
+            onClick={() => navigate("/week")}
+            style={{
+              ...btnStyle,
+              background: theme.buttonBg,
+              color: theme.text,
+              border: `1px solid ${theme.border}`,
+            }}
+          >
+            Week
+          </button>
+          <button
+            onClick={() => onPickIcs("HAN")}
+            style={{
+              ...btnStyle,
+              background: theme.buttonBg,
+              color: theme.text,
+              border: `1px solid ${theme.border}`,
+            }}
+          >
+            ICS 가져오기(HAN)
+          </button>
+          <button
+            onClick={() => onPickIcs("KYU")}
+            style={{
+              ...btnStyle,
+              background: theme.buttonBg,
+              color: theme.text,
+              border: `1px solid ${theme.border}`,
+            }}
+          >
+            ICS 가져오기(KYU)
+          </button>
 
-          <button onClick={exportAll} style={btnStyle}>ICS(전체)</button>
-          <button onClick={exportHan} style={btnStyle}>ICS(HAN)</button>
-          <button onClick={exportKyu} style={btnStyle}>ICS(KYU)</button>
-
-          <button onClick={() => navigate("/stats")} style={btnStyle}>통계</button>
-          <button onClick={() => navigate("/week")} style={btnStyle}>Week</button>
-
-          <label style={toggleStyle}>
+          <label
+            style={{
+              ...toggleStyle,
+              background: theme.buttonBg,
+              color: theme.text,
+              border: `1px solid ${theme.border}`,
+            }}
+          >
             <input
               type="checkbox"
               checked={showHanToggle}
@@ -1169,7 +1934,14 @@ export default function CalendarPage() {
             HAN
           </label>
 
-          <label style={toggleStyle}>
+          <label
+            style={{
+              ...toggleStyle,
+              background: theme.buttonBg,
+              color: theme.text,
+              border: `1px solid ${theme.border}`,
+            }}
+          >
             <input
               type="checkbox"
               checked={showKyuToggle}
@@ -1178,8 +1950,16 @@ export default function CalendarPage() {
             KYU
           </label>
 
-          <button onClick={() => setCompareOn((v) => !v)} style={btnStyle}>
-            Compare {compareOn ? "ON" : "OFF"}
+          <button
+            onClick={() => setDarkMode((v) => !v)}
+            style={{
+              ...btnStyle,
+              background: theme.buttonBg,
+              color: theme.text,
+              border: `1px solid ${theme.border}`,
+            }}
+          >
+            {darkMode ? "Light" : "Dark"}
           </button>
         </div>
       </div>
@@ -1190,10 +1970,10 @@ export default function CalendarPage() {
           marginTop: 10,
           display: "grid",
           gridTemplateColumns: "repeat(7, 1fr)",
-          border: "1px solid rgba(0,0,0,0.10)",
+          border: `1px solid ${theme.border}`,
           borderRadius: 12,
           overflow: "hidden",
-          background: "white",
+          background: theme.cardBg,
         }}
       >
         {weekDays.map((d, i) => (
@@ -1201,12 +1981,12 @@ export default function CalendarPage() {
             key={d}
             style={{
               fontSize: 13,
-              opacity: 0.75,
               padding: "8px 10px",
-              borderRight: i === 6 ? "none" : "1px solid rgba(0,0,0,0.06)",
-              background: "rgba(0,0,0,0.02)",
+              borderRight: i === 6 ? "none" : `1px solid ${theme.borderSoft}`,
+              background: theme.headerBg,
               fontWeight: 800,
               textAlign: "center",
+              color: theme.textSoft,
             }}
           >
             {d}
@@ -1218,8 +1998,32 @@ export default function CalendarPage() {
       <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
         {Array.from({ length: weekCount }).map((_, w) => {
           const weekCells = cells.slice(w * 7, w * 7 + 7);
-          const weekBars = placedBars.filter((b) => b.week === w);
-          const laneCount = Math.min(6, Math.max(0, maxLaneByWeek[w] ?? 0));
+          const allowedStatusTags: DayTag[] = [
+            "FLIGHT",
+            "ADO",
+            "DO",
+            "LO",
+            "RESERVE",
+            "ATDO",
+            "YYC",
+            "BLANK",
+          ];
+
+          const hanWeekBars = placedBars.filter(
+            (b) =>
+              b.week === w &&
+              b.owner === "HAN" &&
+              allowedStatusTags.includes(b.tag) &&
+              !b.id.startsWith("OVL-")
+          );
+
+          const kyuWeekBars = placedBars.filter(
+            (b) =>
+              b.week === w &&
+              b.owner === "KYU" &&
+              allowedStatusTags.includes(b.tag) &&
+              !b.id.startsWith("OVL-")
+          );
 
           return (
             <div
@@ -1229,24 +2033,30 @@ export default function CalendarPage() {
                 border: "1px solid rgba(0,0,0,0.10)",
                 borderRadius: 12,
                 overflow: "hidden",
-                background: "white",
+                background: theme.cardBg,
               }}
             >
               {/* Date row */}
               <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)" }}>
                 {weekCells.map((day, idx) => {
-                  const empty = !day;
-                  const isToday = day ? ymd(day) === todayKey : false;
+                  const inCurrentMonth = day.getMonth() === month.getMonth();
+                  const empty = !inCurrentMonth;
+                  const isToday = ymd(day) === todayKey;
 
                   return (
                     <div
                       key={idx}
+                      onClick={day ? () => openDay(day) : undefined}
                       style={{
                         minHeight: 30,
                         padding: "6px 8px",
                         cursor: day ? "pointer" : "default",
-                        background: empty ? "rgba(0,0,0,0.03)" : "white",
-                        borderRight: idx === 6 ? "none" : "1px solid rgba(0,0,0,0.06)",
+                        background: empty ? theme.emptyBg : theme.cardBg,
+                        borderRight: idx === 6 ? "none" : `1px solid ${theme.borderSoft}`,
+                        display: "flex",
+                        justifyContent: "center",
+                        opacity: inCurrentMonth ? 1 : 0.45,
+                        color: inCurrentMonth ? theme.text : theme.textDim,
                       }}
                       title={day ? "클릭해서 상세보기" : ""}
                     >
@@ -1257,95 +2067,119 @@ export default function CalendarPage() {
                           borderRadius: 999,
                           display: "grid",
                           placeItems: "center",
-                          fontWeight: 900,
+                          fontWeight: 700,
                           fontSize: 12,
-                          background: isToday ? "rgba(17,24,39,0.95)" : "transparent",
-                          color: isToday ? "white" : empty ? "rgba(0,0,0,0.25)" : "rgba(17,24,39,0.90)",
+                          background: isToday ? theme.todayBg : "transparent",
+                          color: isToday ? theme.todayText : empty ? theme.textDim : theme.text,
+                          boxShadow: isToday ? "0 0 0 2px rgba(59,130,246,0.55)" : "none",
                         }}
                       >
-                        {day ? day.getDate() : ""}
+                        {day.getDate()}
                       </div>
                     </div>
                   );
                 })}
               </div>
 
-              {/* Bars layer */}
-              {laneCount > 0 && (
-                <div
-                  style={{
-                    position: "relative",
-                    height: laneCount * 22 + 8,
-                    padding: "2px 6px 6px 6px",
-                    borderTop: "1px solid rgba(0,0,0,0.04)",
-                    borderBottom: "1px solid rgba(0,0,0,0.06)",
-                  }}
-                >
-                  {weekBars.map((b) => {
-                    const top = b.lane * 22 + 2;
-                    const style =
-                      b.id.startsWith("OVL-")
-                        ? ({
-                            ...barStyle("OTHER", "HAN"),
-                            background: "rgba(255,59,48,0.16)",
-                            borderColor: "rgba(255,59,48,0.30)",
-                          } as CSSProperties)
-                        : barStyle(b.tag, b.owner);
+              {/* HAN status row */}
+              <div
+                style={{
+                  position: "relative",
+                  height: 28,
+                  padding: "2px 4px",
+                  borderTop: `1px solid ${theme.borderSoft}`,
+                  borderBottom: `1px solid ${theme.borderSoft}`,
+                  background: theme.cardBg,
+                }}
+              >
+                {hanWeekBars.map((b) => {
+                  const top = 4;
+                  const style = barStyle(b.tag, b.owner);
 
-                    return (
-                      <div
-                        key={b.id}
+                  const loParts =
+                    b.tag === "LO"
+                      ? (() => {
+                        const [baseLabel, durationLabel = ""] = b.label.split(" · ");
+                        const ap = loAirport(baseLabel);
+                        return {
+                          airport: ap,
+                          duration: durationLabel,
+                        };
+                      })()
+                      : null;
+
+                  return (
+                    <div
+                      key={b.id}
+                      style={{
+                        position: "absolute",
+                        left: `${b.left}%`,
+                        width: `calc(${b.width}% - 2px)`,
+                        top,
+                        pointerEvents: "none",
+                        ...style,
+                        color: theme.text,
+                      }}
+                      title={b.label}
+                    >
+                      <span
                         style={{
-                          position: "absolute",
-                          left: `${b.left}%`,
-                          width: `calc(${b.width}% - 2px)`,
-                          top,
-                          ...style,
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                          display: "block",
                         }}
-                        title={b.label}
                       >
-                        <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{b.label}</span>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                          {b.tag === "LO" && loParts ? (
+                            <>
+                              <span style={{ fontSize: 18, lineHeight: 1 }}>🛏</span>
+                              <span style={{ fontWeight: 900, opacity: 0.9 }}>LO</span>
+                              <span>{loParts.airport}</span>
+                              {flagUrlByAirport(loParts.airport) ? (
+                                <img
+                                  src={flagUrlByAirport(loParts.airport)}
+                                  alt=""
+                                  style={{
+                                    width: 16,
+                                    height: 12,
+                                    objectFit: "cover",
+                                    borderRadius: 2,
+                                    display: "inline-block",
+                                    verticalAlign: "middle",
+                                  }}
+                                />
+                              ) : null}
+                              {loParts.duration ? (
+                                <span style={{ opacity: 0.85, fontSize: 12 }}>
+                                  {loParts.duration}
+                                </span>
+                              ) : null}
+                            </>
+                          ) : (
+                            <span>{b.label}</span>
+                          )}
+                        </span>
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
 
               {/* Cell content row */}
               <div
                 style={{
                   display: "grid",
                   gridTemplateColumns: "repeat(7, 1fr)",
-                  borderTop: laneCount > 0 ? "none" : "1px solid rgba(0,0,0,0.06)",
+                  borderTop: `1px solid ${theme.borderSoft}`,
                 }}
               >
                 {weekCells.map((day, idx) => {
-                  if (!day) {
-                    return (
-                      <div
-                        key={idx}
-                        style={{
-                          padding: 8,
-                          minHeight: 170,
-                          background: "rgba(0,0,0,0.03)",
-                          borderRight: idx === 6 ? "none" : "1px solid rgba(0,0,0,0.06)",
-                        }}
-                      />
-                    );
-                  }
-
                   const hanAll = listForDay(visHanEvents, day);
                   const kyuAll = listForDay(visKyuEvents, day);
 
-                  const hanStatus = getStatusEventForDay(hanAll);
-                  const kyuStatus = getStatusEventForDay(kyuAll);
-
-                  const hanLegs = hanAll.filter((e) => getKind(e) === "FLIGHT").slice(0, 1);
-                  const kyuLegs = kyuAll.filter((e) => getKind(e) === "FLIGHT").slice(0, 1);
-
-                  const extra =
-                    Math.max(0, hanAll.filter((e) => getKind(e) === "FLIGHT").length - hanLegs.length) +
-                    Math.max(0, kyuAll.filter((e) => getKind(e) === "FLIGHT").length - kyuLegs.length);
+                  const hanLegs = hanAll.filter((e) => getKind(e) === "FLIGHT").slice(0, 2);
+                  const kyuLegs = kyuAll.filter((e) => getKind(e) === "FLIGHT").slice(0, 2);
 
                   return (
                     <div
@@ -1353,53 +2187,152 @@ export default function CalendarPage() {
                       onClick={() => openDay(day)}
                       role="button"
                       style={{
-                        padding: 8,
+                        padding: "8px 2px",
                         minHeight: 170,
-                        background: "white",
+                        background: theme.cardBg,
+                        borderRight: idx === 6 ? "none" : `1px solid ${theme.borderSoft}`,
                         cursor: "pointer",
-                        borderRight: idx === 6 ? "none" : "1px solid rgba(0,0,0,0.06)",
-                        display: "grid",
-                        gridTemplateRows: "18px 24px 40px 40px 24px 16px",
-                        alignContent: "start",
+                        display: "flex",
+                        flexDirection: "column",
+                        justifyContent: "flex-start",
                       }}
                       title="클릭해서 상세보기"
                     >
-                      {/* HAN STATUS */}
-                      <div style={{ minHeight: 24, marginBottom: 8 }}>
-                        {hanStatus ? <StatusChip e={hanStatus} /> : null}
-                      </div>
-
-                      {/* HAN FLIGHT */}
-                      <div style={{ minHeight: 40, marginBottom: 8 }}>
-                        {hanLegs.length > 0
-                          ? hanLegs.map((e) => <FlightChip key={e.id} owner="HAN" e={e} />)
-                          : null}
-                      </div>
-
-                      {/* KYU FLIGHT */}
-                      <div style={{ minHeight: 40, marginBottom: 6 }}>
-                        {kyuLegs.length > 0
-                          ? kyuLegs.map((e) => <FlightChip key={e.id} owner="KYU" e={e} />)
-                          : null}
-                      </div>
-
-                      {/* KYU STATUS */}
-                      <div style={{ minHeight: 24, marginTop: 6, paddingBottom: 4 }}>
-                        {kyuStatus ? <StatusChip e={kyuStatus} /> : null}
-                      </div>
-
-                      {/* MORE */}
+                      {/* HAN FLIGHT AREA */}
                       <div
                         style={{
-                          minHeight: 16,
-                          fontSize: 10,
-                          opacity: 0.55,
-                          lineHeight: 1.2,
-                          paddingTop: 2,
+                          height: 82,
+                          display: "grid",
+                          gap: 4,
+                          alignContent: "start",
                         }}
                       >
-                        {extra > 0 ? `+${extra} more` : ""}
+                        {hanLegs.length > 0
+                          ? hanLegs.map((e) => (
+                            <FlightChip
+                              key={e.id}
+                              owner="HAN"
+                              e={e}
+                              onClick={() => openFlight(e)}
+                            />
+                          ))
+                          : null}
                       </div>
+
+                      {/* divider */}
+                      <div
+                        style={{
+                          height: 1,
+                          background: theme.borderSoft,
+                          margin: "4px 0",
+                          flexShrink: 0,
+                        }}
+                      />
+
+                      {/* KYU FLIGHT AREA */}
+                      <div
+                        style={{
+                          height: 82,
+                          display: "grid",
+                          gap: 4,
+                          alignContent: "start",
+                        }}
+                      >
+                        {kyuLegs.length > 0
+                          ? kyuLegs.map((e) => (
+                            <FlightChip
+                              key={e.id}
+                              owner="KYU"
+                              e={e}
+                              onClick={() => openFlight(e)}
+                            />
+                          ))
+                          : null}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* KYU status row */}
+              <div
+                style={{
+                  position: "relative",
+                  height: 28,
+                  padding: "2px 4px",
+                  borderTop: `1px solid ${theme.borderSoft}`,
+                  background: theme.cardBg,
+                }}
+              >
+                {kyuWeekBars.map((b) => {
+                  const top = 4;
+                  const style = barStyle(b.tag, b.owner);
+
+                  const loParts =
+                    b.tag === "LO"
+                      ? (() => {
+                        const [baseLabel, durationLabel = ""] = b.label.split(" · ");
+                        const ap = loAirport(baseLabel);
+                        return {
+                          airport: ap,
+                          duration: durationLabel,
+                        };
+                      })()
+                      : null;
+
+                  return (
+                    <div
+                      key={b.id}
+                      style={{
+                        position: "absolute",
+                        left: `${b.left}%`,
+                        width: `calc(${b.width}% - 2px)`,
+                        top,
+                        pointerEvents: "none",
+                        ...style,
+                        color: theme.text,
+                      }}
+                      title={b.label}
+                    >
+                      <span
+                        style={{
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                          display: "block",
+                        }}
+                      >
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                          {b.tag === "LO" && loParts ? (
+                            <>
+                              <span style={{ fontSize: 18, lineHeight: 1 }}>🛏</span>
+                              <span style={{ fontWeight: 900, opacity: 0.9 }}>LO</span>
+                              <span>{loParts.airport}</span>
+                              {flagUrlByAirport(loParts.airport) ? (
+                                <img
+                                  src={flagUrlByAirport(loParts.airport)}
+                                  alt=""
+                                  style={{
+                                    width: 16,
+                                    height: 12,
+                                    objectFit: "cover",
+                                    borderRadius: 2,
+                                    display: "inline-block",
+                                    verticalAlign: "middle",
+                                  }}
+                                />
+                              ) : null}
+                              {loParts.duration ? (
+                                <span style={{ opacity: 0.85, fontSize: 12 }}>
+                                  {loParts.duration}
+                                </span>
+                              ) : null}
+                            </>
+                          ) : (
+                            <span>{b.label}</span>
+                          )}
+                        </span>
+                      </span>
                     </div>
                   );
                 })}
@@ -1409,14 +2342,113 @@ export default function CalendarPage() {
         })}
       </div>
 
-      {/* Modal */}
+      {/* Flight Modal */}
+      {isFlightModalOpen && selectedFlight && (
+        <div
+          onClick={closeFlight}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: theme.overlay,
+            display: "grid",
+            placeItems: "center",
+            zIndex: 10000,
+            padding: 16,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: "min(420px, 100%)",
+              background: theme.modalBg,
+              color: theme.text,
+              border: `1px solid ${theme.border}`,
+              borderRadius: 16,
+              padding: 16,
+              display: "grid",
+              gap: 10,
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div style={{ fontSize: 16, fontWeight: 900 }}>
+                {parseFlightChip(selectedFlight.title).flightNo || "FLIGHT"}
+              </div>
+              <button
+                onClick={closeFlight}
+                style={{
+                  ...modalCloseBtn,
+                  background: theme.buttonBg,
+                  color: theme.text,
+                  border: `1px solid ${theme.border}`,
+                }}
+              >
+                닫기
+              </button>
+            </div>
+
+            <div
+              style={{
+                padding: 12,
+                borderRadius: 12,
+                background:
+                  selectedFlight.owner === "HAN"
+                    ? "rgba(0,122,255,0.12)"
+                    : "rgba(239,68,68,0.12)",
+                border:
+                  selectedFlight.owner === "HAN"
+                    ? "1px solid rgba(0,122,255,0.24)"
+                    : "1px solid rgba(239,68,68,0.24)",
+              }}
+            >
+              <div style={{ fontSize: 18, fontWeight: 900 }}>
+                {parseFlightChip(selectedFlight.title).flightNo || "FLIGHT"}
+              </div>
+              <div style={{ marginTop: 4, fontSize: 15, fontWeight: 800 }}>
+                {parseFlightChip(selectedFlight.title).route || selectedFlight.title}
+              </div>
+            </div>
+
+            <div style={{ display: "grid", gap: 8 }}>
+              <div style={{ fontSize: 13 }}>
+                <strong>출발</strong> {fmtHMFromISO(selectedFlight.start)}
+              </div>
+
+              <div style={{ fontSize: 13 }}>
+                <strong>도착</strong> {fmtHMFromISO(selectedFlight.end)}
+              </div>
+
+              <div style={{ fontSize: 13 }}>
+                <strong>Block</strong> {blockTimeLabel(selectedFlight.start, selectedFlight.end)}
+              </div>
+
+              <div style={{ fontSize: 13 }}>
+                <strong>Duty</strong> {selectedDutyLabel ?? "-"}
+              </div>
+
+              <div style={{ fontSize: 13 }}>
+                <strong>출근</strong> {selectedShowUpLabel ?? "-"}
+              </div>
+
+              <div style={{ fontSize: 13 }}>
+                <strong>원문</strong> {selectedFlight.title}
+              </div>
+
+              <div style={{ fontSize: 12, opacity: 0.75 }}>
+                {selectedFlight.start} ~ {selectedFlight.end}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Day Modal */}
       {isModalOpen && selectedDay && (
         <div
           onClick={closeDay}
           style={{
             position: "fixed",
             inset: 0,
-            background: "rgba(0,0,0,0.35)",
+            background: theme.overlay,
             display: "grid",
             placeItems: "center",
             zIndex: 9999,
@@ -1427,20 +2459,31 @@ export default function CalendarPage() {
             onClick={(e) => e.stopPropagation()}
             style={{
               width: "min(820px, 100%)",
-              background: "white",
+              background: theme.modalBg,
               borderRadius: 16,
               padding: 16,
-              border: "1px solid rgba(0,0,0,0.12)",
+              color: theme.text,
+              border: `1px solid ${theme.border}`,
             }}
           >
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
               <div style={{ fontWeight: 900, fontSize: 16 }}>{ymd(selectedDay)}</div>
-              <button onClick={closeDay} style={modalCloseBtn}>닫기</button>
+              <button
+                onClick={closeDay}
+                style={{
+                  ...modalCloseBtn,
+                  background: theme.buttonBg,
+                  color: theme.text,
+                  border: `1px solid ${theme.border}`,
+                }}
+              >
+                닫기
+              </button>
             </div>
 
             <div style={{ marginTop: 12, display: "grid", gap: 14 }}>
-              <Section title="HAN" color={sectionTitleColor("HAN")} items={modalHan} />
-              <Section title="KYU" color={sectionTitleColor("KYU")} items={modalKyu} />
+              <Section title="HAN" color={sectionTitleColor("HAN")} items={modalHan} darkMode={darkMode} />
+              <Section title="KYU" color={sectionTitleColor("KYU")} items={modalKyu} darkMode={darkMode} />
 
               <div style={{ border: "1px solid rgba(0,0,0,0.10)", borderRadius: 14, padding: 12 }}>
                 <div style={{ fontWeight: 900, color: "rgba(255,59,48,0.92)", marginBottom: 8 }}>
@@ -1478,9 +2521,28 @@ export default function CalendarPage() {
    Modal section
 ========================================================= */
 
-function Section({ title, color, items }: { title: string; color: string; items: EventItem[] }) {
+function Section({
+  title,
+  color,
+  items,
+  darkMode,
+}: {
+  title: string;
+  color: string;
+  items: EventItem[];
+  darkMode: boolean;
+}) {
   return (
-    <div style={{ border: "1px solid rgba(0,0,0,0.10)", borderRadius: 14, padding: 12 }}>
+    <div
+      style={{
+        border: darkMode
+          ? "1px solid rgba(255,255,255,0.10)"
+          : "1px solid rgba(0,0,0,0.10)",
+        borderRadius: 14,
+        padding: 12,
+        background: darkMode ? "#243041" : "#ffffff",
+      }}
+    >
       <div style={{ fontWeight: 900, color, marginBottom: 8 }}>{title}</div>
 
       {items.length === 0 ? (
