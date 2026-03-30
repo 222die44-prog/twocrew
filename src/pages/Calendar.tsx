@@ -263,7 +263,6 @@ const airportCountry: Record<string, string> = {
   OGG: "US",
   KOA: "US",
   LIH: "US",
-  GUM: "GU",
 
   LAX: "US",
   SFO: "US",
@@ -275,7 +274,6 @@ const airportCountry: Record<string, string> = {
   ATL: "US",
   DFW: "US",
   BOS: "US",
-  HNL: "US",
   ANC: "US",
   DTW: "US",
   MSP: "US",
@@ -356,7 +354,7 @@ type Kind =
   | "DO"
   | "ATDO"
   | "ADO"
-  | "YYC"
+  | "YVC"
   | "RESERVE"
   | "BLANK"
   | "RDO"
@@ -377,35 +375,58 @@ function getKind(e: EventItem): Kind {
   const rawK = ((e as any).kind as string | undefined)?.toUpperCase().trim();
   const t = normalizeSpaces(String(e.title ?? "")).toUpperCase();
 
+  // 1) 저장된 kind를 최우선 신뢰
   if (rawK) {
     if (rawK === "FLIGHT") return "FLIGHT";
     if (rawK === "LO") return "LO";
     if (rawK === "DO") return "DO";
     if (rawK === "ATDO") return "ATDO";
     if (rawK === "ADO") return "ADO";
-    if (rawK === "YYC") return "YYC";
+    if (rawK === "YVC") return "YVC";
     if (rawK === "RESERVE") return "RESERVE";
     if (rawK === "BLANK") return "BLANK";
     if (rawK === "RDO") return "RDO";
     if (rawK === "ALM") return "ALM";
     if (rawK === "ALV") return "ALV";
-    if (rawK === "HM_STBY") return "HM_STBY";
-    if (rawK === "AP_STBY") return "AP_STBY";
     if (rawK === "RCRM") return "RCRM";
     if (rawK === "JCRM") return "JCRM";
     if (rawK === "EMER") return "EMER";
+
+    // 혹시 과거 데이터가 HM_STBY / AP_STBY로 저장돼 있어도 RESERVE로 흡수
+    if (rawK === "HM_STBY" || /^HM[ _-]?STBY\d*\b/.test(rawK) || /^HM[ _-]?SBY\d*\b/.test(rawK)) {
+      return "HM_STBY";
+    }
+    if (rawK === "AP_STBY" || /^AP[ _-]?STBY\d*\b/.test(rawK) || /^AP[ _-]?SBY\d*\b/.test(rawK)) {
+      return "AP_STBY";
+    }
   }
 
+  // 2) fallback: title 기준 판정
   if (t === "LO" || t.startsWith("LO ")) return "LO";
   if (t === "DO" || t.startsWith("DO ")) return "DO";
   if (t === "ATDO" || t.startsWith("ATDO ")) return "ATDO";
   if (t === "ADO" || t.startsWith("ADO")) return "ADO";
-  if (t === "YYC" || t.startsWith("YYC")) return "YYC";
+  if (t === "YVC" || t.startsWith("YVC")) return "YVC";
   if (t === "RESERVE" || t.startsWith("RESERVE ")) return "RESERVE";
   if (t === "BLANK" || t.startsWith("BLANK ")) return "BLANK";
   if (t === "RDO" || t.startsWith("RDO ")) return "RDO";
   if (t === "ALM" || t.startsWith("ALM ")) return "ALM";
   if (t === "ALV" || t.startsWith("ALV ")) return "ALV";
+  if (/^HM[ _-]?STBY\d*\b/.test(t)) return "HM_STBY";
+  if (/^AP[ _-]?STBY\d*\b/.test(t)) return "AP_STBY";
+  if (/^HM[ _-]?SBY\d*\b/.test(t)) return "HM_STBY";
+  if (/^AP[ _-]?SBY\d*\b/.test(t)) return "AP_STBY";
+  if (/^HM\b.*\b(STBY|SBY)\d*\b/.test(t)) return "HM_STBY";
+  if (/^AP\b.*\b(STBY|SBY)\d*\b/.test(t)) return "AP_STBY";
+
+  if (t.startsWith("RCRM")) return "RCRM";
+  if (t.startsWith("JCRM")) return "JCRM";
+  if (t.startsWith("EMER")) return "EMER";
+
+  // flight 판정은 마지막
+  if (/\b[A-Z]{1,3}\d{2,4}\b/.test(t) && /\b[A-Z]{3}-[A-Z]{3}\b/.test(t)) {
+    return "FLIGHT";
+  }
 
   return "OTHER";
 }
@@ -422,16 +443,16 @@ function getDisplayTitle(e: EventItem) {
       return "ATDO";
     case "ADO":
       return "ADO";
-    case "YYC":
-      return "YYC";
+    case "YVC":
+      return "YVC";
     case "RESERVE":
       return "RESERVE";
     case "BLANK":
       return "BLANK";
     case "HM_STBY":
-      return "HM_STBY";
+      return "🏠 HM STBY";
     case "AP_STBY":
-      return "AP_STBY";
+      return "✈️ AP STBY";
     case "LO":
       return normalizeSpaces(e.title);
     default:
@@ -446,7 +467,7 @@ function isAllDayEvent(e: EventItem) {
     kind === "DO" ||
     kind === "ATDO" ||
     kind === "ADO" ||
-    kind === "YYC" ||
+    kind === "YVC" ||
     kind === "ALM" ||
     kind === "ALV" ||
     kind === "RDO" ||
@@ -513,19 +534,43 @@ function flightDestAirportFromTitle(title: string): string | null {
 }
 
 function flightBarLabelForDay(owner: Role, ownerEvents: EventItem[], day: Date) {
-  const flights = ownerEvents
-    .filter((e) => getKind(e) === "FLIGHT" && eventCoversDay(e, day))
+  const dayEvents = ownerEvents.filter((e) => eventCoversDay(e, day));
+
+  const lo = dayEvents.find((e) => getKind(e) === "LO");
+  if (lo) {
+    const airport = extractAirportFromLoTitle(lo.title);
+    if (airport) return `🛫 →${airport}`;
+  }
+
+  const flights = dayEvents
+    .filter((e) => getKind(e) === "FLIGHT")
     .sort((a, b) => a.start.localeCompare(b.start));
 
   if (flights.length === 0) return "✈";
 
-  // 같은 날 여러 leg가 있으면 최종 도착지를 우선 표시
-  for (let i = flights.length - 1; i >= 0; i--) {
-    const dest = flightDestAirportFromTitle(flights[i].title);
-    if (dest) return `🛫 →${dest}`;
+  // 당일 여러 편이면 집공항 제외한 마지막 해외공항
+  if (flights.length >= 2) {
+    const airports: string[] = [];
+
+    for (const f of flights) {
+      const m = f.title.match(/\b([A-Z]{3})-([A-Z]{3})\b/);
+      if (m) {
+        airports.push(m[1]);
+        airports.push(m[2]);
+      }
+    }
+
+    const nonHome = airports.filter((a) => a !== "ICN" && a !== "GMP");
+    if (nonHome.length > 0) {
+      return `🛫 →${nonHome[nonHome.length - 1]}`;
+    }
   }
 
-  return "✈";
+  // 단일편이면 마지막 도착지
+  const lastFlight = flights[flights.length - 1];
+  const dest = flightDestAirportFromTitleSafe(lastFlight.title);
+
+  return dest ? `🛫 →${dest}` : "✈";
 }
 
 /* =========================================================
@@ -741,7 +786,7 @@ type DayTag =
   | "DO"
   | "ATDO"
   | "ADO"
-  | "YYC"
+  | "YVC"
   | "HM_STBY"
   | "AP_STBY"
   | "JCRM"
@@ -764,7 +809,7 @@ const DAYTAG_PRIORITY: DayTag[] = [
   "ATDO",
   "ADO",
   "DO",
-  "YYC",
+  "YVC",
   "OTHER",
   "NONE",
 ];
@@ -772,8 +817,8 @@ const DAYTAG_PRIORITY: DayTag[] = [
 function toDayTagFromKind(kind: Kind): DayTag {
   if (kind === "FLIGHT") return "FLIGHT";
   if (kind === "LO") return "LO";
-  if (kind === "HM_STBY") return "HM_STBY";
-  if (kind === "AP_STBY") return "AP_STBY";
+  if (kind === "HM_STBY") return "RESERVE";
+  if (kind === "AP_STBY") return "RESERVE";
   if (kind === "RESERVE") return "RESERVE";
   if (kind === "BLANK") return "BLANK";
   if (kind === "RCRM") return "RCRM";
@@ -785,7 +830,7 @@ function toDayTagFromKind(kind: Kind): DayTag {
   if (kind === "DO") return "DO";
   if (kind === "ATDO") return "DO";
   if (kind === "ADO") return "DO";
-  if (kind === "YYC") return "DO";
+  if (kind === "YVC") return "DO";
   if (kind === "OTHER") return "OTHER";
   return "NONE";
 }
@@ -807,6 +852,13 @@ function dayTagFor(ownerEvents: EventItem[], day: Date): DayTag {
 function dayStatusFor(ownerEvents: EventItem[], day: Date, owner: Role): { tag: DayTag; label: string } {
   const dayEvents = ownerEvents.filter((e) => eventCoversDay(e, day));
 
+  if (dayEvents.length === 0) {
+    if (owner === "KYU") {
+      return { tag: "BLANK", label: "BLANK" };
+    }
+    return { tag: "NONE", label: "" };
+  }
+
   const hasLo = dayEvents.some((e) => getKind(e) === "LO");
   if (hasLo) {
     return {
@@ -826,13 +878,50 @@ function dayStatusFor(ownerEvents: EventItem[], day: Date, owner: Role): { tag: 
     };
   }
 
+  const hasJcrm = dayEvents.some((e) => getKind(e) === "JCRM");
+  if (hasJcrm) return { tag: "JCRM", label: "TRAINING" };
+
+  const hasRcrm = dayEvents.some((e) => getKind(e) === "RCRM");
+  if (hasRcrm) return { tag: "RCRM", label: "TRAINING" };
+
+  const hasEmer = dayEvents.some((e) => getKind(e) === "EMER");
+  if (hasEmer) return { tag: "EMER", label: "TRAINING" };
+
   const kinds = dayEvents.map((e) => getKind(e));
 
-  if (kinds.includes("RESERVE")) return { tag: "RESERVE", label: "RESERVE" };
-  if (kinds.includes("DO") || kinds.includes("ALM") || kinds.includes("YYC") || kinds.includes("ATDO") || kinds.includes("ADO") || kinds.includes("ALV") || kinds.includes("RDO")) {
+  if (kinds.includes("HM_STBY")) {
+    return { tag: "HM_STBY", label: "HM STBY" };
+  }
+
+  if (kinds.includes("AP_STBY")) {
+    return { tag: "AP_STBY", label: "AP STBY" };
+  }
+
+  // RESERVE가 있으면 무조건 RESERVE
+  if (kinds.includes("RESERVE")) {
+    return { tag: "RESERVE", label: "RESERVE" };
+  }
+
+  // 규영이는 BLANK도 status bar에서 RESERVE처럼 표시
+  if (owner === "KYU" && kinds.includes("BLANK")) {
+    return { tag: "BLANK", label: "BLANK" };
+  }
+
+  if (
+    kinds.includes("DO") ||
+    kinds.includes("ALM") ||
+    kinds.includes("ALV") ||
+    kinds.includes("RDO") ||
+    kinds.includes("ATDO") ||
+    kinds.includes("ADO") ||
+    kinds.includes("YVC")
+  ) {
     return { tag: "DO", label: "DO" };
   }
-  if (kinds.includes("BLANK")) return { tag: "BLANK", label: "BLANK" };
+
+  if (kinds.includes("BLANK")) {
+    return { tag: "BLANK", label: "BLANK" };
+  }
 
   return { tag: "NONE", label: "" };
 }
@@ -881,7 +970,7 @@ function buildRunsByDayKey(days: Date[], keyOf: (d: Date) => { tag: DayTag; labe
         k.tag === "RESERVE" ||
         k.tag === "BLANK" ||
         k.tag === "ATDO" ||
-        k.tag === "YYC" ||
+        k.tag === "YVC" ||
         k.tag === "ADO" ||
         (k.tag === "LO" && k.label === curLabel) ||
         (k.tag === "FLIGHT" && k.label === curLabel)
@@ -1064,15 +1153,13 @@ function barLabel(tag: DayTag, owner: Role) {
   if (tag === "DO") return "DO";
   if (tag === "ADO") return "ADO";
   if (tag === "ATDO") return "ATDO";
-  if (tag === "YYC") return "YYC";
+  if (tag === "YVC") return "YVC";
   if (tag === "RESERVE") return "RESERVE";
   if (tag === "BLANK") return "BLANK";
   if (tag === "RDO") return "DO";
-  if (tag === "RCRM") return "RCRM";
-  if (tag === "JCRM") return "JCRM";
-  if (tag === "EMER") return "EMER";
-  if (tag === "HM_STBY") return "HM_STBY";
-  if (tag === "AP_STBY") return "AP_STBY";
+  if (tag === "RCRM" || tag === "JCRM" || tag === "EMER") return "TRAINING";
+  if (tag === "HM_STBY") return "🏠 HM STBY";
+  if (tag === "AP_STBY") return "✈️ AP STBY";
   if (tag === "OTHER") return "OTHER";
   return "";
 }
@@ -1111,41 +1198,27 @@ function barStyle(tag: DayTag, owner: Role): CSSProperties {
       };
     }
 
-    if (owner === "KYU") {
-      return {
-        ...base,
-        background: "rgba(239,68,68,0.40)",
-        borderColor: "rgba(239,68,68,0.45)",
-      };
-    }
+    return {
+      ...base,
+      background: "rgba(239,68,68,0.40)",
+      borderColor: "rgba(239,68,68,0.45)",
+    };
   }
 
   if (tag === "RESERVE") {
     return { ...base, background: "rgba(245,158,11,0.40)", borderColor: "rgba(245,158,11,0.30)" };
   }
 
-  if (tag === "BLANK") {
-    return { ...base, background: "rgba(245,158,11,0.16)", borderColor: "rgba(245,158,11,0.30)" };
-  }
-
-  if (tag === "DO") {
-    return { ...base, background: "rgba(34,197,94,0.40)", borderColor: "rgba(34,197,94,0.25)" };
-  }
-
-  if (tag === "ATDO") {
-    return { ...base, background: "rgba(34,197,94,0.40)", borderColor: "rgba(100,116,139,0.26)" };
-  }
-
-  if (tag === "YYC") {
-    return { ...base, background: "rgba(34,197,94,0.40)", borderColor: "rgba(100,116,139,0.26)" };
-  }
-
-  if (tag === "ADO") {
-    return { ...base, background: "rgba(34,197,94,0.40)", borderColor: "rgba(100,116,139,0.26)" };
-  }
-
   if (tag === "HM_STBY" || tag === "AP_STBY") {
-    return { ...base, background: "rgba(236,72,153,0.14)", borderColor: "rgba(236,72,153,0.28)" };
+    return { ...base, background: "rgba(245,158,11,0.40)", borderColor: "rgba(245,158,11,0.30)" };
+  }
+
+  if (tag === "BLANK") {
+    return { ...base, background: "rgba(245,158,11,0.40)", borderColor: "rgba(245,158,11,0.30)" };
+  }
+
+  if (tag === "DO" || tag === "ATDO" || tag === "YVC" || tag === "ADO") {
+    return { ...base, background: "rgba(34,197,94,0.40)", borderColor: "rgba(100,116,139,0.26)" };
   }
 
   if (tag === "RCRM" || tag === "JCRM" || tag === "EMER") {
@@ -1153,7 +1226,11 @@ function barStyle(tag: DayTag, owner: Role): CSSProperties {
   }
 
   if (tag === "OTHER") {
-    return { ...base, background: "rgba(161,161,170,0.14)", borderColor: "rgba(161,161,170,0.26)" };
+    return {
+      ...base,
+      background: "rgba(156,163,175,0.35)",
+      borderColor: "rgba(156,163,175,0.5)",
+    };
   }
 
   return { ...base, background: "transparent", borderColor: "transparent" };
@@ -1229,7 +1306,7 @@ function kindBadgeStyle(e: EventItem): CSSProperties {
         background: "rgba(100,116,139,0.12)",
         border: "1px solid rgba(100,116,139,0.22)",
       };
-    case "YYC":
+    case "YVC":
       return {
         background: "rgba(100,116,139,0.12)",
         border: "1px solid rgba(100,116,139,0.22)",
@@ -1248,8 +1325,8 @@ function kindBadgeStyle(e: EventItem): CSSProperties {
     case "HM_STBY":
     case "AP_STBY":
       return {
-        background: "rgba(236,72,153,0.12)",
-        border: "1px solid rgba(236,72,153,0.22)",
+        background: "rgba(245,158,11,0.14)",
+        border: "1px solid rgba(245,158,11,0.25)",
       };
     case "LO":
       return {
@@ -1288,19 +1365,18 @@ function mergeAndSaveImportedEvents(imported: EventItem[], owner: Role) {
     owner,
   }));
 
-  const all = [...existing, ...normalizedImported];
+  const importedKeys = new Set(
+    normalizedImported.map(
+      (e) => `${(e as any).owner}|${e.title}|${e.start}|${e.end}`
+    )
+  );
 
-  const seen = new Set<string>();
-  const dedup: EventItem[] = [];
+  const kept = existing.filter((e) => {
+    const key = `${(e as any).owner}|${e.title}|${e.start}|${e.end}`;
+    return !importedKeys.has(key);
+  });
 
-  for (const e of all) {
-    const sig = `${(e as any).owner}|${e.title}|${e.start}|${e.end}|${String((e as any).kind ?? "")}`;
-    if (seen.has(sig)) continue;
-    seen.add(sig);
-    dedup.push(e);
-  }
-
-  saveEvents(dedup);
+  saveEvents([...kept, ...normalizedImported]);
 }
 
 function FlightChip({
@@ -1390,8 +1466,8 @@ function StatusChip({ e }: { e: EventItem }) {
         ? "ATDO"
         : kind === "ADO"
           ? "ADO"
-          : kind === "YYC"
-            ? "YYC"
+          : kind === "YVC"
+            ? "YVC"
             : kind === "DO"
               ? "DO"
               : kind === "RESERVE"
@@ -1405,9 +1481,9 @@ function StatusChip({ e }: { e: EventItem }) {
                       : kind === "ALV"
                         ? "DO"
                         : kind === "HM_STBY"
-                          ? "HM_STBY"
+                          ? "🏠 HM STBY"
                           : kind === "AP_STBY"
-                            ? "AP_STBY"
+                            ? "✈️ AP STBY"
                             : getDisplayTitle(e);
 
   return (
@@ -1784,62 +1860,319 @@ export default function CalendarPage() {
       overlay: "rgba(0,0,0,0.35)",
     };
 
+  const totalFlightCount =
+    hanEvents.filter((e) => getKind(e) === "FLIGHT").length +
+    kyuEvents.filter((e) => getKind(e) === "FLIGHT").length;
+
+  const totalLayoverCount = events.filter((e) => getKind(e) === "LO").length;
+
+  const thisMonthHanFlights = hanEvents.filter((e) => {
+    const d = new Date(e.start);
+    return getKind(e) === "FLIGHT" && d.getFullYear() === month.getFullYear() && d.getMonth() === month.getMonth();
+  }).length;
+
+  const thisMonthKyuFlights = kyuEvents.filter((e) => {
+    const d = new Date(e.start);
+    return getKind(e) === "FLIGHT" && d.getFullYear() === month.getFullYear() && d.getMonth() === month.getMonth();
+  }).length;
+
+
   const todayKey = ymd(new Date());
 
   return (
     <div
       style={{
-        padding: 12,
-        maxWidth: 980,
-        margin: "0 auto",
-        background: theme.pageBg,
-        color: theme.text,
-        minHeight: "100vh",
-      }}
+  padding: "12px 12px 24px",
+  width: "100%",
+  maxWidth: 980,
+  margin: "0 auto",
+  background: theme.pageBg,
+  color: theme.text,
+  minHeight: "100vh",
+  boxSizing: "border-box",
+}}
     >
+      
+{/* hero section */}
+      {/* App-like top area */}
       <div
         style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "flex-end",
-          gap: 10,
-          flexWrap: "wrap",
+          marginBottom: 14,
+          display: "grid",
+          gap: 12,
         }}
       >
-        <div>
-          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 900, color: theme.text }}>캘린더</h2>
-          <div style={{ marginTop: 4, fontSize: 12, color: theme.textSoft }}>현재 사용자: {meName}</div>
+        {/* Hero */}
+        <div
+          style={{
+            position: "relative",
+            overflow: "hidden",
+            borderRadius: 24,
+            padding: "18px 16px 16px",
+            minHeight: 180,
+            background:
+              darkMode
+                ? "linear-gradient(135deg, rgba(17,24,39,0.20), rgba(0,0,0,0.38)), url('/airplane.jpg')"
+                : "linear-gradient(135deg, rgba(255,255,255,0.20), rgba(0,0,0,0.18)), url('/airplane.jpg')",
+            backgroundSize: "cover",
+            backgroundPosition: "center",
+            color: "#fff",
+            boxShadow: darkMode
+              ? "0 18px 40px rgba(0,0,0,0.34)"
+              : "0 18px 36px rgba(0,0,0,0.16)",
+            border: darkMode
+              ? "1px solid rgba(255,255,255,0.10)"
+              : "1px solid rgba(255,255,255,0.35)",
+          }}
+        >
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              background:
+                darkMode
+                  ? "linear-gradient(180deg, rgba(15,23,42,0.10) 0%, rgba(15,23,42,0.66) 100%)"
+                  : "linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(17,24,39,0.50) 100%)",
+            }}
+          />
+
+          <div style={{ position: "relative", zIndex: 1, display: "grid", gap: 14 }}>
+            {/* top row */}
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "flex-start",
+                gap: 12,
+              }}
+            >
+              <div style={{ minWidth: 0 }}>
+                <div
+                  style={{
+                    fontSize: 12,
+                    fontWeight: 800,
+                    letterSpacing: 0.3,
+                    opacity: 0.92,
+                  }}
+                >
+                  TwoCrew Calendar
+                </div>
+
+                <div
+                  style={{
+                    marginTop: 6,
+                    fontSize: 30,
+                    lineHeight: 1,
+                    fontWeight: 950,
+                    letterSpacing: -0.8,
+                  }}
+                >
+                  {monthLabel(month)}
+                </div>
+
+                <div
+                  style={{
+                    marginTop: 8,
+                    fontSize: 13,
+                    fontWeight: 700,
+                    opacity: 0.92,
+                  }}
+                >
+                  현재 사용자 · {meName}
+                </div>
+              </div>
+
+              <button
+                onClick={() => setDarkMode((v) => !v)}
+                style={{
+                  border: "1px solid rgba(255,255,255,0.22)",
+                  background: "rgba(255,255,255,0.14)",
+                  color: "#fff",
+                  backdropFilter: "blur(10px)",
+                  WebkitBackdropFilter: "blur(10px)",
+                  borderRadius: 14,
+                  padding: "8px 12px",
+                  fontSize: 12,
+                  fontWeight: 900,
+                  cursor: "pointer",
+                  flexShrink: 0,
+                }}
+              >
+                {darkMode ? "Light" : "Dark"}
+              </button>
+            </div>
+
+            {/* summary cards */}
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+                gap: 8,
+              }}
+            >
+              <div
+                style={{
+                  padding: "12px 10px",
+                  borderRadius: 16,
+                  background: "rgba(255,255,255,0.14)",
+                  border: "1px solid rgba(255,255,255,0.16)",
+                  backdropFilter: "blur(10px)",
+                  WebkitBackdropFilter: "blur(10px)",
+                }}
+              >
+                <div style={{ fontSize: 11, opacity: 0.85, fontWeight: 700 }}>Flights</div>
+                <div style={{ marginTop: 4, fontSize: 22, fontWeight: 950 }}>{totalFlightCount}</div>
+              </div>
+
+              <div
+                style={{
+                  padding: "12px 10px",
+                  borderRadius: 16,
+                  background: "rgba(255,255,255,0.14)",
+                  border: "1px solid rgba(255,255,255,0.16)",
+                  backdropFilter: "blur(10px)",
+                  WebkitBackdropFilter: "blur(10px)",
+                }}
+              >
+                <div style={{ fontSize: 11, opacity: 0.85, fontWeight: 700 }}>Layovers</div>
+                <div style={{ marginTop: 4, fontSize: 22, fontWeight: 950 }}>{totalLayoverCount}</div>
+              </div>
+
+              <div
+                style={{
+                  padding: "12px 10px",
+                  borderRadius: 16,
+                  background: "rgba(255,255,255,0.14)",
+                  border: "1px solid rgba(255,255,255,0.16)",
+                  backdropFilter: "blur(10px)",
+                  WebkitBackdropFilter: "blur(10px)",
+                }}
+              >
+                <div style={{ fontSize: 11, opacity: 0.85, fontWeight: 700 }}>Month</div>
+                <div style={{ marginTop: 4, fontSize: 22, fontWeight: 950 }}>
+                  {thisMonthHanFlights + thisMonthKyuFlights}
+                </div>
+              </div>
+            </div>
+
+            {/* bottom pills */}
+            <div
+              style={{
+                display: "flex",
+                gap: 8,
+                flexWrap: "wrap",
+              }}
+            >
+              <div
+                style={{
+                  padding: "7px 10px",
+                  borderRadius: 999,
+                  background: "rgba(0,122,255,0.18)",
+                  border: "1px solid rgba(255,255,255,0.14)",
+                  fontSize: 12,
+                  fontWeight: 900,
+                }}
+              >
+                HAN {thisMonthHanFlights}
+              </div>
+
+              <div
+                style={{
+                  padding: "7px 10px",
+                  borderRadius: 999,
+                  background: "rgba(239,68,68,0.18)",
+                  border: "1px solid rgba(255,255,255,0.14)",
+                  fontSize: 12,
+                  fontWeight: 900,
+                }}
+              >
+                KYU {thisMonthKyuFlights}
+              </div>
+
+              <div
+                style={{
+                  padding: "7px 10px",
+                  borderRadius: 999,
+                  background: "rgba(255,255,255,0.12)",
+                  border: "1px solid rgba(255,255,255,0.14)",
+                  fontSize: 12,
+                  fontWeight: 800,
+                }}
+              >
+                Mobile UI
+              </div>
+            </div>
+          </div>
         </div>
 
-        <div style={{ display: "flex", gap: 8, alignItems: "center", justifyContent: "flex-end", flexWrap: "wrap" }}>
-
-
-
+        {/* Month navigation */}
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "44px 1fr 44px",
+            gap: 8,
+            alignItems: "center",
+          }}
+        >
           <button
             onClick={prevMonth}
             style={{
               ...btnStyle,
+              height: 44,
+              padding: 0,
+              borderRadius: 14,
               background: theme.buttonBg,
               color: theme.text,
               border: `1px solid ${theme.border}`,
+              fontSize: 18,
             }}
           >
-            이전달
+            ‹
           </button>
-          <div style={{ fontWeight: 900, fontSize: 16, minWidth: 80, textAlign: "center" }}>
+
+          <div
+            style={{
+              height: 44,
+              borderRadius: 14,
+              border: `1px solid ${theme.border}`,
+              background: theme.cardBg,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontWeight: 950,
+              fontSize: 16,
+              letterSpacing: -0.3,
+            }}
+          >
             {monthLabel(month)}
           </div>
+
           <button
             onClick={nextMonth}
             style={{
               ...btnStyle,
+              height: 44,
+              padding: 0,
+              borderRadius: 14,
               background: theme.buttonBg,
               color: theme.text,
               border: `1px solid ${theme.border}`,
+              fontSize: 18,
             }}
           >
-            다음달
+            ›
           </button>
+        </div>
+
+        {/* Quick actions */}
+        <div
+          style={{
+            display: "flex",
+            gap: 8,
+            overflowX: "auto",
+            paddingBottom: 2,
+          }}
+        >
           <button
             onClick={exportAll}
             style={{
@@ -1847,10 +2180,13 @@ export default function CalendarPage() {
               background: theme.buttonBg,
               color: theme.text,
               border: `1px solid ${theme.border}`,
+              whiteSpace: "nowrap",
+              flexShrink: 0,
             }}
           >
-            ICS(전체)
+            ICS 전체
           </button>
+
           <button
             onClick={exportHan}
             style={{
@@ -1858,10 +2194,13 @@ export default function CalendarPage() {
               background: theme.buttonBg,
               color: theme.text,
               border: `1px solid ${theme.border}`,
+              whiteSpace: "nowrap",
+              flexShrink: 0,
             }}
           >
-            ICS(HAN)
+            ICS HAN
           </button>
+
           <button
             onClick={exportKyu}
             style={{
@@ -1869,10 +2208,13 @@ export default function CalendarPage() {
               background: theme.buttonBg,
               color: theme.text,
               border: `1px solid ${theme.border}`,
+              whiteSpace: "nowrap",
+              flexShrink: 0,
             }}
           >
-            ICS(KYU)
+            ICS KYU
           </button>
+
           <button
             onClick={() => navigate("/stats")}
             style={{
@@ -1880,10 +2222,13 @@ export default function CalendarPage() {
               background: theme.buttonBg,
               color: theme.text,
               border: `1px solid ${theme.border}`,
+              whiteSpace: "nowrap",
+              flexShrink: 0,
             }}
           >
             통계
           </button>
+
           <button
             onClick={() => navigate("/week")}
             style={{
@@ -1891,10 +2236,23 @@ export default function CalendarPage() {
               background: theme.buttonBg,
               color: theme.text,
               border: `1px solid ${theme.border}`,
+              whiteSpace: "nowrap",
+              flexShrink: 0,
             }}
           >
             Week
           </button>
+        </div>
+
+        {/* Import / toggles */}
+        <div
+          style={{
+            display: "flex",
+            gap: 8,
+            flexWrap: "wrap",
+            alignItems: "center",
+          }}
+        >
           <button
             onClick={() => onPickIcs("HAN")}
             style={{
@@ -1904,8 +2262,9 @@ export default function CalendarPage() {
               border: `1px solid ${theme.border}`,
             }}
           >
-            ICS 가져오기(HAN)
+            가져오기(HAN)
           </button>
+
           <button
             onClick={() => onPickIcs("KYU")}
             style={{
@@ -1915,15 +2274,17 @@ export default function CalendarPage() {
               border: `1px solid ${theme.border}`,
             }}
           >
-            ICS 가져오기(KYU)
+            가져오기(KYU)
           </button>
 
           <label
             style={{
               ...toggleStyle,
-              background: theme.buttonBg,
+              background: showHanToggle ? "rgba(0,122,255,0.12)" : theme.buttonBg,
               color: theme.text,
-              border: `1px solid ${theme.border}`,
+              border: showHanToggle
+                ? "1px solid rgba(0,122,255,0.35)"
+                : `1px solid ${theme.border}`,
             }}
           >
             <input
@@ -1937,9 +2298,11 @@ export default function CalendarPage() {
           <label
             style={{
               ...toggleStyle,
-              background: theme.buttonBg,
+              background: showKyuToggle ? "rgba(239,68,68,0.12)" : theme.buttonBg,
               color: theme.text,
-              border: `1px solid ${theme.border}`,
+              border: showKyuToggle
+                ? "1px solid rgba(239,68,68,0.30)"
+                : `1px solid ${theme.border}`,
             }}
           >
             <input
@@ -1949,18 +2312,6 @@ export default function CalendarPage() {
             />
             KYU
           </label>
-
-          <button
-            onClick={() => setDarkMode((v) => !v)}
-            style={{
-              ...btnStyle,
-              background: theme.buttonBg,
-              color: theme.text,
-              border: `1px solid ${theme.border}`,
-            }}
-          >
-            {darkMode ? "Light" : "Dark"}
-          </button>
         </div>
       </div>
 
@@ -2005,8 +2356,13 @@ export default function CalendarPage() {
             "LO",
             "RESERVE",
             "ATDO",
-            "YYC",
+            "YVC",
             "BLANK",
+            "HM_STBY",
+            "AP_STBY",
+            "JCRM",
+            "RCRM",
+            "EMER",
           ];
 
           const hanWeekBars = placedBars.filter(
@@ -2178,8 +2534,17 @@ export default function CalendarPage() {
                   const hanAll = listForDay(visHanEvents, day);
                   const kyuAll = listForDay(visKyuEvents, day);
 
-                  const hanLegs = hanAll.filter((e) => getKind(e) === "FLIGHT").slice(0, 2);
-                  const kyuLegs = kyuAll.filter((e) => getKind(e) === "FLIGHT").slice(0, 2);
+                  const hanFlights = hanAll.filter((e) => getKind(e) === "FLIGHT");
+                  const kyuFlights = kyuAll.filter((e) => getKind(e) === "FLIGHT");
+
+                  const hanHasLoOnly =
+                    hanAll.some((e) => getKind(e) === "LO") && hanFlights.length === 0;
+
+                  const kyuHasLoOnly =
+                    kyuAll.some((e) => getKind(e) === "LO") && kyuFlights.length === 0;
+
+                  const hanLegs = hanHasLoOnly ? [] : hanFlights.slice(0, 2);
+                  const kyuLegs = kyuHasLoOnly ? [] : kyuFlights.slice(0, 2);
 
                   return (
                     <div
@@ -2610,7 +2975,8 @@ const toggleStyle: CSSProperties = {
 };
 
 const btnStyle: CSSProperties = {
-  padding: "8px 10px",
+  padding: "10px 12px",
+  minHeight: 40,
   borderRadius: 12,
   border: "1px solid rgba(0,0,0,0.14)",
   background: "white",

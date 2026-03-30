@@ -1,4 +1,4 @@
-import type { RosterKind } from "@/types/schedule";
+import type { RosterKind } from "../types/schedule";
 
 export function detectKind(text: string): RosterKind {
   const t = (text || "").trim().toUpperCase();

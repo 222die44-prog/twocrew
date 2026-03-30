@@ -26,6 +26,7 @@ function App() {
         <Route path="/import" element={<ImportPDF />} />
         <Route path="/stats" element={<StatsPage />} /> {/* ✅ 추가 */}
         <Route path="/week" element={<WeekPage />} />
+        <Route path="/meet" element={<div style={{ padding: 20 }}>Meet Day 준비중</div>} />
       </Routes>
     </BrowserRouter>
   );

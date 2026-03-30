@@ -1,19 +1,23 @@
 export type Role = "HAN" | "KYU";
 
 export type Kind =
-  | "FLIGHT"
-  | "LO"
-  | "DO"
-  | "RDO"
-  | "ALM"
-  | "ALV"
-  | "RESERVE"
-  | "HM_STBY"
-  | "AP_STBY"
-  | "RCRM"
-  | "JCRM"
-  | "EMER"
-  | "OTHER";
+    | "FLIGHT"
+    | "LO"
+    | "DO"
+    | "ATDO"
+    | "ADO"
+    | "YYC"
+    | "BLANK"
+    | "RESERVE"
+    | "RDO"
+    | "ALM"
+    | "ALV"
+    | "HM_STBY"
+    | "AP_STBY"
+    | "RCRM"
+    | "JCRM"
+    | "EMER"
+    | "OTHER";
 
 export type EventItem = {
   id: string;

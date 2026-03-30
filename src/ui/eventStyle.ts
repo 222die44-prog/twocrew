@@ -1,4 +1,4 @@
-import type { ScheduleEvent } from "@/types/schedule";
+import type { ScheduleEvent } from "../types/schedule";
 
 export function getKindLabel(ev: ScheduleEvent): string {
   switch (ev.kind) {
