@@ -17,6 +17,11 @@ function asDate(x: unknown): Date {
   return x instanceof Date ? x : new Date(String(x));
 }
 
+function importIcsQuick() {
+  const useHan = window.confirm("HAN 스케줄로 가져오려면 확인, KYU로 가져오려면 취소를 누르세요.");
+  onPickIcs(useHan ? "HAN" : "KYU");
+}
+
 function pad(n: number) {
   return String(n).padStart(2, "0");
 }
@@ -1403,12 +1408,12 @@ function FlightChip({
         justifySelf: "stretch",
         minWidth: 0,
         display: "grid",
-        gridTemplateColumns: "4px 1fr",
-        borderRadius: 10,
+        gridTemplateColumns: "3px 1fr",
+        borderRadius: 8,
         overflow: "hidden",
         border: `1px solid ${ownerChipBorder(owner)}`,
         background: ownerChipBG(owner),
-        minHeight: 30,
+        minHeight: 24,
         cursor: "pointer",
       }}
       title={`${e.title}\n${fmtHMFromISO(e.start)} ~ ${fmtHMFromISO(e.end)}`}
@@ -1416,9 +1421,9 @@ function FlightChip({
       <div style={{ background: ownerColor(owner) }} />
       <div
         style={{
-          padding: "3px 6px",
+          padding: "2px 4px",
           display: "grid",
-          gap: 2,
+          gap: 1,
           alignContent: "center",
           minWidth: 0,
         }}
@@ -1428,23 +1433,24 @@ function FlightChip({
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            gap: 4,
-            fontSize: 14,
+            gap: 3,
+            fontSize: 11,
             fontWeight: 900,
             color: ownerColor(owner),
-            lineHeight: 1.1,
+            lineHeight: 1.05,
             textAlign: "center",
           }}
         >
-          <span style={{ fontSize: 9, lineHeight: 1 }}>✈</span>
+          <span style={{ fontSize: 8, lineHeight: 1 }}>✈</span>
           <span>{flightNo}</span>
         </div>
+
         <div
           style={{
-            fontSize: 14,
+            fontSize: 11,
             fontWeight: 800,
-            opacity: 0.9,
-            lineHeight: 1.1,
+            opacity: 0.92,
+            lineHeight: 1.05,
             textAlign: "center",
             wordBreak: "break-word",
           }}
@@ -1452,7 +1458,7 @@ function FlightChip({
           {route}
         </div>
       </div>
-    </div >
+    </div>
   );
 }
 
@@ -1519,6 +1525,8 @@ function StatusChip({ e }: { e: EventItem }) {
 export default function CalendarPage() {
   const location = useLocation();
   const navigate = useNavigate();
+
+  const isMobile = window.innerWidth <= 768;
 
   const [refreshSig, setRefreshSig] = useState(0);
   const [compareOn, setCompareOn] = useState(true);
@@ -1797,6 +1805,10 @@ export default function CalendarPage() {
     exportICS(events, `twocrew-all-${monthLabel(month)}.ics`);
   }
 
+  function exportImage() {
+    window.print();
+  }
+
   function exportHan() {
     exportICS(hanEvents, `twocrew-han-${monthLabel(month)}.ics`);
   }
@@ -1880,49 +1892,48 @@ export default function CalendarPage() {
   const todayKey = ymd(new Date());
 
   return (
-    <div
-      style={{
-  padding: "12px 12px 24px",
-  width: "100%",
-  maxWidth: 980,
-  margin: "0 auto",
-  background: theme.pageBg,
-  color: theme.text,
-  minHeight: "100vh",
-  boxSizing: "border-box",
-}}
-    >
-      
-{/* hero section */}
-      {/* App-like top area */}
+<div
+  style={{
+    padding: isMobile ? "12px 12px 24px" : "12px 16px 24px",
+    width: "100%",
+    maxWidth: "none",
+    margin: 0,
+    background: theme.pageBg,
+    color: theme.text,
+    minHeight: "100vh",
+    boxSizing: "border-box",
+  }}
+>
+
+      {/* Compact top area */}
       <div
         style={{
-          marginBottom: 14,
+          marginBottom: 12,
           display: "grid",
-          gap: 12,
+          gap: 10,
         }}
       >
-        {/* Hero */}
+        {/* Compact hero */}
         <div
           style={{
             position: "relative",
             overflow: "hidden",
-            borderRadius: 24,
-            padding: "18px 16px 16px",
-            minHeight: 180,
+            borderRadius: 20,
+            padding: "16px 14px",
+            minHeight: 110,
             background:
               darkMode
-                ? "linear-gradient(135deg, rgba(17,24,39,0.20), rgba(0,0,0,0.38)), url('/airplane.jpg')"
-                : "linear-gradient(135deg, rgba(255,255,255,0.20), rgba(0,0,0,0.18)), url('/airplane.jpg')",
+                ? "linear-gradient(135deg, rgba(17,24,39,0.22), rgba(0,0,0,0.34)), url('/airplane.jpg.jpg')"
+                : "linear-gradient(135deg, rgba(255,255,255,0.18), rgba(0,0,0,0.14)), url('/airplane.jpg.jpg')",
             backgroundSize: "cover",
             backgroundPosition: "center",
             color: "#fff",
             boxShadow: darkMode
-              ? "0 18px 40px rgba(0,0,0,0.34)"
-              : "0 18px 36px rgba(0,0,0,0.16)",
+              ? "0 14px 32px rgba(0,0,0,0.28)"
+              : "0 12px 24px rgba(0,0,0,0.12)",
             border: darkMode
-              ? "1px solid rgba(255,255,255,0.10)"
-              : "1px solid rgba(255,255,255,0.35)",
+              ? "1px solid rgba(255,255,255,0.08)"
+              : "1px solid rgba(255,255,255,0.28)",
           }}
         >
           <div
@@ -1931,177 +1942,75 @@ export default function CalendarPage() {
               inset: 0,
               background:
                 darkMode
-                  ? "linear-gradient(180deg, rgba(15,23,42,0.10) 0%, rgba(15,23,42,0.66) 100%)"
-                  : "linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(17,24,39,0.50) 100%)",
+                  ? "linear-gradient(180deg, rgba(15,23,42,0.12) 0%, rgba(15,23,42,0.64) 100%)"
+                  : "linear-gradient(180deg, rgba(255,255,255,0.02) 0%, rgba(17,24,39,0.42) 100%)",
             }}
           />
 
-          <div style={{ position: "relative", zIndex: 1, display: "grid", gap: 14 }}>
-            {/* top row */}
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "flex-start",
-                gap: 12,
-              }}
-            >
-              <div style={{ minWidth: 0 }}>
-                <div
-                  style={{
-                    fontSize: 12,
-                    fontWeight: 800,
-                    letterSpacing: 0.3,
-                    opacity: 0.92,
-                  }}
-                >
-                  TwoCrew Calendar
-                </div>
-
-                <div
-                  style={{
-                    marginTop: 6,
-                    fontSize: 30,
-                    lineHeight: 1,
-                    fontWeight: 950,
-                    letterSpacing: -0.8,
-                  }}
-                >
-                  {monthLabel(month)}
-                </div>
-
-                <div
-                  style={{
-                    marginTop: 8,
-                    fontSize: 13,
-                    fontWeight: 700,
-                    opacity: 0.92,
-                  }}
-                >
-                  현재 사용자 · {meName}
-                </div>
-              </div>
-
-              <button
-                onClick={() => setDarkMode((v) => !v)}
-                style={{
-                  border: "1px solid rgba(255,255,255,0.22)",
-                  background: "rgba(255,255,255,0.14)",
-                  color: "#fff",
-                  backdropFilter: "blur(10px)",
-                  WebkitBackdropFilter: "blur(10px)",
-                  borderRadius: 14,
-                  padding: "8px 12px",
-                  fontSize: 12,
-                  fontWeight: 900,
-                  cursor: "pointer",
-                  flexShrink: 0,
-                }}
-              >
-                {darkMode ? "Light" : "Dark"}
-              </button>
-            </div>
-
-            {/* summary cards */}
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
-                gap: 8,
-              }}
-            >
+          <div
+            style={{
+              position: "relative",
+              zIndex: 1,
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "flex-start",
+              gap: 12,
+            }}
+          >
+            <div style={{ minWidth: 0 }}>
               <div
                 style={{
-                  padding: "12px 10px",
-                  borderRadius: 16,
-                  background: "rgba(255,255,255,0.14)",
-                  border: "1px solid rgba(255,255,255,0.16)",
-                  backdropFilter: "blur(10px)",
-                  WebkitBackdropFilter: "blur(10px)",
-                }}
-              >
-                <div style={{ fontSize: 11, opacity: 0.85, fontWeight: 700 }}>Flights</div>
-                <div style={{ marginTop: 4, fontSize: 22, fontWeight: 950 }}>{totalFlightCount}</div>
-              </div>
-
-              <div
-                style={{
-                  padding: "12px 10px",
-                  borderRadius: 16,
-                  background: "rgba(255,255,255,0.14)",
-                  border: "1px solid rgba(255,255,255,0.16)",
-                  backdropFilter: "blur(10px)",
-                  WebkitBackdropFilter: "blur(10px)",
-                }}
-              >
-                <div style={{ fontSize: 11, opacity: 0.85, fontWeight: 700 }}>Layovers</div>
-                <div style={{ marginTop: 4, fontSize: 22, fontWeight: 950 }}>{totalLayoverCount}</div>
-              </div>
-
-              <div
-                style={{
-                  padding: "12px 10px",
-                  borderRadius: 16,
-                  background: "rgba(255,255,255,0.14)",
-                  border: "1px solid rgba(255,255,255,0.16)",
-                  backdropFilter: "blur(10px)",
-                  WebkitBackdropFilter: "blur(10px)",
-                }}
-              >
-                <div style={{ fontSize: 11, opacity: 0.85, fontWeight: 700 }}>Month</div>
-                <div style={{ marginTop: 4, fontSize: 22, fontWeight: 950 }}>
-                  {thisMonthHanFlights + thisMonthKyuFlights}
-                </div>
-              </div>
-            </div>
-
-            {/* bottom pills */}
-            <div
-              style={{
-                display: "flex",
-                gap: 8,
-                flexWrap: "wrap",
-              }}
-            >
-              <div
-                style={{
-                  padding: "7px 10px",
-                  borderRadius: 999,
-                  background: "rgba(0,122,255,0.18)",
-                  border: "1px solid rgba(255,255,255,0.14)",
-                  fontSize: 12,
-                  fontWeight: 900,
-                }}
-              >
-                HAN {thisMonthHanFlights}
-              </div>
-
-              <div
-                style={{
-                  padding: "7px 10px",
-                  borderRadius: 999,
-                  background: "rgba(239,68,68,0.18)",
-                  border: "1px solid rgba(255,255,255,0.14)",
-                  fontSize: 12,
-                  fontWeight: 900,
-                }}
-              >
-                KYU {thisMonthKyuFlights}
-              </div>
-
-              <div
-                style={{
-                  padding: "7px 10px",
-                  borderRadius: 999,
-                  background: "rgba(255,255,255,0.12)",
-                  border: "1px solid rgba(255,255,255,0.14)",
-                  fontSize: 12,
+                  fontSize: 11,
                   fontWeight: 800,
+                  opacity: 0.9,
+                  letterSpacing: 0.2,
                 }}
               >
-                Mobile UI
+                TwoCrew Calendar
+              </div>
+
+              <div
+                style={{
+                  marginTop: 6,
+                  fontSize: 32,
+                  lineHeight: 1,
+                  fontWeight: 950,
+                  letterSpacing: -0.8,
+                }}
+              >
+                {monthLabel(month)}
+              </div>
+
+              <div
+                style={{
+                  marginTop: 8,
+                  fontSize: 13,
+                  fontWeight: 700,
+                  opacity: 0.9,
+                }}
+              >
+                현재 사용자 · {meName}
               </div>
             </div>
+
+            <button
+              onClick={() => setDarkMode((v) => !v)}
+              style={{
+                border: "1px solid rgba(255,255,255,0.18)",
+                background: "rgba(255,255,255,0.12)",
+                color: "#fff",
+                backdropFilter: "blur(10px)",
+                WebkitBackdropFilter: "blur(10px)",
+                borderRadius: 14,
+                padding: "8px 12px",
+                fontSize: 12,
+                fontWeight: 900,
+                cursor: "pointer",
+                flexShrink: 0,
+              }}
+            >
+              {darkMode ? "Light" : "Dark"}
+            </button>
           </div>
         </div>
 
@@ -2164,122 +2073,80 @@ export default function CalendarPage() {
           </button>
         </div>
 
-        {/* Quick actions */}
+        {/* Primary actions */}
         <div
           style={{
-            display: "flex",
+            display: "grid",
+            gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
             gap: 8,
-            overflowX: "auto",
-            paddingBottom: 2,
           }}
         >
           <button
-            onClick={exportAll}
+            onClick={() => navigate("/")}
             style={{
               ...btnStyle,
+              minHeight: 42,
               background: theme.buttonBg,
               color: theme.text,
               border: `1px solid ${theme.border}`,
-              whiteSpace: "nowrap",
-              flexShrink: 0,
             }}
           >
-            ICS 전체
-          </button>
-
-          <button
-            onClick={exportHan}
-            style={{
-              ...btnStyle,
-              background: theme.buttonBg,
-              color: theme.text,
-              border: `1px solid ${theme.border}`,
-              whiteSpace: "nowrap",
-              flexShrink: 0,
-            }}
-          >
-            ICS HAN
-          </button>
-
-          <button
-            onClick={exportKyu}
-            style={{
-              ...btnStyle,
-              background: theme.buttonBg,
-              color: theme.text,
-              border: `1px solid ${theme.border}`,
-              whiteSpace: "nowrap",
-              flexShrink: 0,
-            }}
-          >
-            ICS KYU
-          </button>
-
-          <button
-            onClick={() => navigate("/stats")}
-            style={{
-              ...btnStyle,
-              background: theme.buttonBg,
-              color: theme.text,
-              border: `1px solid ${theme.border}`,
-              whiteSpace: "nowrap",
-              flexShrink: 0,
-            }}
-          >
-            통계
+            Home
           </button>
 
           <button
             onClick={() => navigate("/week")}
             style={{
               ...btnStyle,
+              minHeight: 42,
               background: theme.buttonBg,
               color: theme.text,
               border: `1px solid ${theme.border}`,
-              whiteSpace: "nowrap",
-              flexShrink: 0,
             }}
           >
             Week
           </button>
+
+          <button
+            onClick={importIcsQuick}
+            style={{
+              ...btnStyle,
+              minHeight: 42,
+              background: theme.buttonBg,
+              color: theme.text,
+              border: `1px solid ${theme.border}`,
+            }}
+          >
+            Import
+          </button>
+
+          <button
+            onClick={exportImage}
+            style={{
+              ...btnStyle,
+              minHeight: 42,
+              background: theme.buttonBg,
+              color: theme.text,
+              border: `1px solid ${theme.border}`,
+            }}
+          >
+            Export
+          </button>
         </div>
 
-        {/* Import / toggles */}
+        {/* Owner toggles */}
         <div
           style={{
-            display: "flex",
+            display: "grid",
+            gridTemplateColumns: "1fr 1fr",
             gap: 8,
-            flexWrap: "wrap",
-            alignItems: "center",
           }}
         >
-          <button
-            onClick={() => onPickIcs("HAN")}
-            style={{
-              ...btnStyle,
-              background: theme.buttonBg,
-              color: theme.text,
-              border: `1px solid ${theme.border}`,
-            }}
-          >
-            가져오기(HAN)
-          </button>
-
-          <button
-            onClick={() => onPickIcs("KYU")}
-            style={{
-              ...btnStyle,
-              background: theme.buttonBg,
-              color: theme.text,
-              border: `1px solid ${theme.border}`,
-            }}
-          >
-            가져오기(KYU)
-          </button>
-
           <label
             style={{
               ...toggleStyle,
+              justifyContent: "center",
+              minHeight: 42,
               background: showHanToggle ? "rgba(0,122,255,0.12)" : theme.buttonBg,
               color: theme.text,
               border: showHanToggle
@@ -2298,6 +2165,8 @@ export default function CalendarPage() {
           <label
             style={{
               ...toggleStyle,
+              justifyContent: "center",
+              minHeight: 42,
               background: showKyuToggle ? "rgba(239,68,68,0.12)" : theme.buttonBg,
               color: theme.text,
               border: showKyuToggle
@@ -2441,8 +2310,8 @@ export default function CalendarPage() {
               <div
                 style={{
                   position: "relative",
-                  height: 28,
-                  padding: "2px 4px",
+                  height: isMobile ? 28 : 24,
+                   padding: "2px 4px",
                   borderTop: `1px solid ${theme.borderSoft}`,
                   borderBottom: `1px solid ${theme.borderSoft}`,
                   background: theme.cardBg,
@@ -2553,7 +2422,7 @@ export default function CalendarPage() {
                       role="button"
                       style={{
                         padding: "8px 2px",
-                        minHeight: 170,
+                        minHeight: isMobile ? 132 : 110,
                         background: theme.cardBg,
                         borderRight: idx === 6 ? "none" : `1px solid ${theme.borderSoft}`,
                         cursor: "pointer",
@@ -2566,7 +2435,7 @@ export default function CalendarPage() {
                       {/* HAN FLIGHT AREA */}
                       <div
                         style={{
-                          height: 82,
+                          height: isMobile ? 62 : 50,
                           display: "grid",
                           gap: 4,
                           alignContent: "start",
@@ -2597,7 +2466,7 @@ export default function CalendarPage() {
                       {/* KYU FLIGHT AREA */}
                       <div
                         style={{
-                          height: 82,
+                          height: isMobile ? 62 : 50,
                           display: "grid",
                           gap: 4,
                           alignContent: "start",
@@ -2623,7 +2492,7 @@ export default function CalendarPage() {
               <div
                 style={{
                   position: "relative",
-                  height: 28,
+                  height: isMobile ? 28 : 24,
                   padding: "2px 4px",
                   borderTop: `1px solid ${theme.borderSoft}`,
                   background: theme.cardBg,
@@ -2964,25 +2833,26 @@ function Section({
 const toggleStyle: CSSProperties = {
   display: "flex",
   alignItems: "center",
-  gap: 4,
+  gap: 6,
   fontWeight: 800,
   fontSize: 12,
-  padding: "6px 8px",
-  borderRadius: 10,
+  padding: "8px 10px",
+  borderRadius: 12,
   border: "1px solid rgba(0,0,0,0.12)",
   background: "white",
   cursor: "pointer",
+  boxSizing: "border-box",
 };
 
 const btnStyle: CSSProperties = {
   padding: "10px 12px",
-  minHeight: 40,
   borderRadius: 12,
   border: "1px solid rgba(0,0,0,0.14)",
   background: "white",
   cursor: "pointer",
   fontWeight: 800,
   fontSize: 12,
+  boxSizing: "border-box",
 };
 
 const modalCloseBtn: CSSProperties = {
