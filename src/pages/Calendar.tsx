@@ -1357,7 +1357,7 @@ function ownerChipBorder(owner: Role) {
   return owner === "HAN" ? "rgba(0,122,255,0.35)" : "rgba(239,68,68,0.22)";
 }
 
-function mergeAndSaveImportedEvents(imported: EventItem[], owner: Role) {
+function replaceOwnerEvents(imported: EventItem[], owner: Role) {
   const existing = loadEvents();
 
   const normalizedImported: EventItem[] = imported.map((e) => ({
@@ -1365,16 +1365,7 @@ function mergeAndSaveImportedEvents(imported: EventItem[], owner: Role) {
     owner,
   }));
 
-  const importedKeys = new Set(
-    normalizedImported.map(
-      (e) => `${(e as any).owner}|${e.title}|${e.start}|${e.end}`
-    )
-  );
-
-  const kept = existing.filter((e) => {
-    const key = `${(e as any).owner}|${e.title}|${e.start}|${e.end}`;
-    return !importedKeys.has(key);
-  });
+  const kept = existing.filter((e) => (e as any).owner !== owner);
 
   saveEvents([...kept, ...normalizedImported]);
 }
@@ -1554,7 +1545,7 @@ export default function CalendarPage() {
     const roleFromImport = (location.state as any)?.importRole as Role | undefined;
     const owner = roleFromImport ?? me;
 
-    mergeAndSaveImportedEvents(imported, owner);
+    replaceOwnerEvents(imported, owner);
     setRefreshSig((s) => s + 1);
     navigate("/cal", { replace: true, state: null });
   }, [location.state, me, navigate]);
@@ -1815,7 +1806,13 @@ export default function CalendarPage() {
   async function importIcsFile(owner: Role, file: File) {
     const text = await file.text();
     const imported = parseIcsToEvents(text, owner);
-    mergeAndSaveImportedEvents(imported, owner);
+
+    const ok = window.confirm(
+      `${owner} 기존 일정을 지우고 새 ICS로 교체할까요?`
+    );
+    if (!ok) return;
+
+    replaceOwnerEvents(imported, owner);
     setRefreshSig((s) => s + 1);
   }
 
