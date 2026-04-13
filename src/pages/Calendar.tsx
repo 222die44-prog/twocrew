@@ -17,11 +17,6 @@ function asDate(x: unknown): Date {
   return x instanceof Date ? x : new Date(String(x));
 }
 
-function importIcsQuick() {
-  const useHan = window.confirm("HAN 스케줄로 가져오려면 확인, KYU로 가져오려면 취소를 누르세요.");
-  onPickIcs(useHan ? "HAN" : "KYU");
-}
-
 function pad(n: number) {
   return String(n).padStart(2, "0");
 }
@@ -1836,6 +1831,12 @@ export default function CalendarPage() {
     input.click();
   }
 
+  function importIcsQuick() {
+    const useHan = window.confirm("HAN 스케줄로 가져오려면 확인, KYU로 가져오려면 취소를 누르세요.");
+    onPickIcs(useHan ? "HAN" : "KYU");
+  }
+
+
   const [darkMode, setDarkMode] = useState(true);
 
   const theme = darkMode
@@ -1892,18 +1893,18 @@ export default function CalendarPage() {
   const todayKey = ymd(new Date());
 
   return (
-<div
-  style={{
-    padding: isMobile ? "12px 12px 24px" : "12px 16px 24px",
-    width: "100%",
-    maxWidth: "none",
-    margin: 0,
-    background: theme.pageBg,
-    color: theme.text,
-    minHeight: "100vh",
-    boxSizing: "border-box",
-  }}
->
+    <div
+      style={{
+        padding: isMobile ? "12px 12px 24px" : "12px 16px 24px",
+        width: "100%",
+        maxWidth: "none",
+        margin: 0,
+        background: theme.pageBg,
+        color: theme.text,
+        minHeight: "100vh",
+        boxSizing: "border-box",
+      }}
+    >
 
       {/* Compact top area */}
       <div
@@ -2311,7 +2312,7 @@ export default function CalendarPage() {
                 style={{
                   position: "relative",
                   height: isMobile ? 28 : 24,
-                   padding: "2px 4px",
+                  padding: "2px 4px",
                   borderTop: `1px solid ${theme.borderSoft}`,
                   borderBottom: `1px solid ${theme.borderSoft}`,
                   background: theme.cardBg,
